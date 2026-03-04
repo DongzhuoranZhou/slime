@@ -18,9 +18,12 @@ export XDG_CACHE_HOME="/workspace/.cache"
 export XDG_DATA_HOME="/workspace/.local/share"
 export XDG_STATE_HOME="/workspace/.local/state"
 
+export http_proxy="http://httpproxy.glm.ai:8888"
+export https_proxy="http://httpproxy.glm.ai:8888"
 
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
+export WANDB_KEY="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"
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
 if [ "$NVLINK_COUNT" -gt 0 ]; then
@@ -106,10 +109,10 @@ OPTIMIZER_ARGS=(
 )
 
 WANDB_ARGS=(
-   # --use-wandb
-   # --wandb-project slime-dev
-   # --wandb-group qwen3-4B-test
-   # --wandb-key ${WANDB_KEY}
+   --use-wandb
+   --wandb-project slime-dev
+   --wandb-group qwen3-9B-test
+   --wandb-key ${WANDB_KEY}
 )
 
 SGLANG_ARGS=(
@@ -129,7 +132,11 @@ MISC_ARGS=(
 
 # launch the master node of ray in container
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+# export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+# export NO_PROXY="${no_proxy}"
+
+export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.,172.16.,172.17.,172.18.,172.19.,172.2,192.168."
 export NO_PROXY="${no_proxy}"
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
@@ -146,9 +153,8 @@ ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train.py \
    --actor-num-nodes 1 \
-   --actor-num-gpus-per-node 8 \
-   --rollout-num-gpus 8 \
-   --colocate \
+   --actor-num-gpus-per-node 4 \
+   --rollout-num-gpus 4 \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \
    ${ROLLOUT_ARGS[@]} \
