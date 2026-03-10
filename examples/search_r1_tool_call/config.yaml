@@ -1,0 +1,25 @@
+# Max number of search turns per episode (same as SEARCH_R1_CONFIGS["max_turns"])
+max_turns: 2
+
+# Environment module path — loaded by geo3k_vlm_multi_turn/rollout.py
+rollout_interaction_env_path: examples.search_r1_tool_call.env_search
+
+# ── Search backend ──────────────────────────────────────────────────────────
+# Options: "local" or "google"
+search_backend: local
+search_concurrency: 256
+topk: 3
+
+# Local backend (only used when search_backend="local")
+local_search_url: "http://127.0.0.1:8000/retrieve"
+local_search_proxy: null
+
+# Google backend (only used when search_backend="google")
+google_api_key: "your_api_key_here"
+google_snippet_only: true
+google_proxy: null
+
+# ── Reward weights ───────────────────────────────────────────────────────────
+reward_score: 1.0         # full score for EM match
+reward_format_score: 0.1  # deducted when answer found but no tool call made
+reward_tool_use_score: 0.05  # partial credit for using the tool without EM match
