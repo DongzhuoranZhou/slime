@@ -1,37 +1,22 @@
 #!/bin/bash
 
-# Qwen3 VL RL training on geo3k dataset
-# Usage: 
-#   SLIME_SCRIPT_MODEL_NAME=Qwen3-VL-2B-Instruct ./run_geo3k_vlm.sh
+# Qwen3.5-35B-A3B VL RL training on geo3k dataset
+
+pip install -U transformers
+
+# IMPORTANT: This branch is specially modified for slime's current Megatron
+# version and Qwen3.5 from the main Megatron Bridge. Other models are not verified!
+# To restore the original Megatron Bridge, run:
+#   pip install git+https://github.com/fzyzcjy/Megatron-Bridge.git@dev_rl --no-build-isolation
+# TODO: Remove this once Megatron & Megatron Bridge are upgraded upstream.
+pip install git+https://github.com/coding-famer/Megatron-Bridge-slime.git@qwen35 --no-build-isolation
 
 # Configuration
 TRAIN_BACKEND="megatron"
-MODEL_NAME=${SLIME_SCRIPT_MODEL_NAME:-"Qwen3-VL-8B-Instruct"}
+MODEL_NAME="Qwen3_5-35B-A3B"
 DATASET_NAME=${SLIME_SCRIPT_DATASET_NAME:-"chenhegu/geo3k_imgurl"}
 NUM_GPUS=${SLIME_SCRIPT_NUM_GPUS:-8}
 DATASET_LOCAL_NAME=$(basename "$DATASET_NAME")
-
-# Validate MODEL_NAME
-VALID_MODELS="
-  Qwen2.5-VL-3B-Instruct
-  Qwen2.5-VL-7B-Instruct
-  Qwen2.5-VL-32B-Instruct
-  Qwen2.5-VL-72B-Instruct
-  Qwen3-VL-2B-Instruct
-  Qwen3-VL-4B-Instruct
-  Qwen3-VL-8B-Instruct
-  Qwen3-VL-30B-A3B-Instruct
-  Qwen3-VL-235B-A22B-Instruct
-  Qwen3-VL-2B-Thinking
-  Qwen3-VL-4B-Thinking
-  Qwen3-VL-8B-Thinking
-  Qwen3-VL-30B-A3B-Thinking
-  Qwen3-VL-235B-A22B-Thinking
-"
-if ! echo "$VALID_MODELS" | grep -qw "$MODEL_NAME"; then
-   echo "Error: MODEL_NAME must be one of: $VALID_MODELS"
-   exit 1
-fi
 
 MODEL_NAME_LOWER=$(echo "$MODEL_NAME" | tr '[:upper:]' '[:lower:]')
 
@@ -82,8 +67,8 @@ fi
 # Common args
 CKPT_ARGS=(
    --hf-checkpoint /root/models/${MODEL_NAME}
-   # qwen3 vl model has rotary base 5000000, set it when applicable
-   --rotary-base 5000000
+   --load /root/models/${MODEL_NAME}
+   --megatron-to-hf-mode bridge
 )
 
 ROLLOUT_ARGS=(
@@ -92,7 +77,7 @@ ROLLOUT_ARGS=(
    --label-key answer
    --apply-chat-template
    --rollout-shuffle
-   --rm-type math
+   --rm-type deepscaler
    --num-rollout 3000
    --rollout-batch-size 64
    --n-samples-per-prompt 8
@@ -131,9 +116,18 @@ OPTIMIZER_ARGS=(
 )
 
 SGLANG_ARGS=(
-   --rollout-num-gpus-per-engine 1
-   --sglang-mem-fraction-static 0.6
+   --rollout-num-gpus-per-engine 8
+   --sglang-mem-fraction-static 0.7
+   --sglang-ep-size 8
    --sglang-cuda-graph-bs 1 2 4 8 16 24 32 40 48 56 64 72 80 88 96 104 112 120 128 136 144 152 160 168 176 184 192 200 208 216 224 232 240 248 256
+
+   # MTP speculative decoding
+   --sglang-speculative-algorithm EAGLE
+   --sglang-speculative-num-steps 2
+   --sglang-speculative-eagle-topk 1
+   --sglang-speculative-num-draft-tokens 3
+
+   --sglang-max-running-requests 512
 )
 
 # Wandb args (only if WANDB_API_KEY is set)
@@ -157,31 +151,29 @@ MISC_ARGS=(
 # megatron backend
 BACKEND_ARGS=(
    --train-backend megatron
-   --load /root/models/${MODEL_NAME}
-   --tensor-model-parallel-size 4
+   # Qwen3.5-35B-A3B has num_query_groups = 2
+   --tensor-model-parallel-size 2
    --sequence-parallel
    --pipeline-model-parallel-size 1
    --context-parallel-size 1
-   --expert-model-parallel-size 1
+   --expert-model-parallel-size 8
    --expert-tensor-parallel-size 1
    --recompute-granularity full
    --recompute-method uniform
    --recompute-num-layers 1
-   --use-dynamic-batch-size
-   --max-tokens-per-gpu 4096
    --attention-dropout 0.0
    --hidden-dropout 0.0
    --accumulate-allreduce-grads-in-fp32
    --attention-softmax-in-fp32
    --attention-backend flash
-   --megatron-to-hf-mode bridge
+
+   # Packing is not supported for GDN currently
+   --qkv-format bshd
+   --micro-batch-size 1
 )
 
-# get MODEL_ARGS from scripts/models for megatron backend
 SLIME_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &>/dev/null && pwd)"
-MODEL_ARGS_FILE=$(echo "$MODEL_NAME" | sed 's/-Instruct//g; s/-Thinking//g; s/Qwen3-VL-/qwen3-/g; s/-2B/-1.7B/g')
-# VL models require rotary-base 5000000
-MODEL_ARGS_ROTARY_BASE=5000000 source "${SLIME_DIR}/scripts/models/${MODEL_ARGS_FILE}.sh"
+source "${SLIME_DIR}/scripts/models/qwen3.5-35B-A3B.sh"
 
 # Start Ray if not using external Ray
 if [ "$USE_EXTERNAL_RAY" = "0" ]; then

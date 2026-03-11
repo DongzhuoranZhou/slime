@@ -11,19 +11,30 @@ index 6fbd1db82..f80ec11bb 100644
          ]:
              self.hf_config.architectures[0] = "DeepseekV3ForCausalLMNextN"
 diff --git a/python/sglang/srt/disaggregation/common/conn.py b/python/sglang/srt/disaggregation/common/conn.py
-index 67fe82ad6..67f564f04 100644
+index 67fe82ad6..2ef25c49b 100644
 --- a/python/sglang/srt/disaggregation/common/conn.py
 +++ b/python/sglang/srt/disaggregation/common/conn.py
-@@ -116,10 +116,18 @@ class CommonKVManager(BaseKVManager):
+@@ -24,6 +24,7 @@ from sglang.srt.disaggregation.base.conn import (
+ from sglang.srt.disaggregation.utils import DisaggregationMode
+ from sglang.srt.distributed import get_pp_group
+ from sglang.srt.layers.dp_attention import (
++    get_attention_cp_size,
+     get_attention_dp_rank,
+     get_attention_dp_size,
+     get_attention_tp_rank,
+@@ -116,10 +117,21 @@ class CommonKVManager(BaseKVManager):
  
          bootstrap_server_url = f"{host}:{self.bootstrap_port}"
          url = f"http://{bootstrap_server_url}/route"
 +        route_attn_tp_rank = self.attn_tp_rank
 +        # In prefill CP mode, attention TP rank is flattened to 0, but requests are
 +        # still routed by engine rank; register by engine rank to preserve all routes.
++        # Only apply this when actual CP is in use (cp_size > 1), not in pure DP
++        # attention mode (e.g. EP64) where each rank has its own dp_group already.
 +        if (
 +            self.disaggregation_mode == DisaggregationMode.PREFILL
 +            and self.attn_tp_size == 1
++            and get_attention_cp_size() > 1
 +        ):
 +            route_attn_tp_rank = self.kv_args.engine_rank
          payload = {
@@ -34,7 +45,7 @@ index 67fe82ad6..67f564f04 100644
              "attn_dp_size": self.attn_dp_size,
              "attn_dp_rank": self.attn_dp_rank,
              "pp_size": self.pp_size,
-@@ -333,6 +341,10 @@ class CommonKVReceiver(BaseKVReceiver):
+@@ -333,6 +345,10 @@ class CommonKVReceiver(BaseKVReceiver):
              self.required_dst_info_num = (
                  self.kv_mgr.attn_tp_size // self.prefill_attn_tp_size
              )
@@ -45,7 +56,7 @@ index 67fe82ad6..67f564f04 100644
              self.required_prefill_response_num = 1 * (
                  self.prefill_pp_size // self.kv_mgr.pp_size
              )
-@@ -357,6 +369,11 @@ class CommonKVReceiver(BaseKVReceiver):
+@@ -357,6 +373,11 @@ class CommonKVReceiver(BaseKVReceiver):
              # multiple connections in the connection pool and have to send dummy requests to other prefill ranks,
              # or the KVPoll will never be set correctly
              self.target_tp_rank = self.target_tp_ranks[0]
@@ -57,7 +68,15 @@ index 67fe82ad6..67f564f04 100644
              self.required_dst_info_num = 1
              if self.kv_mgr.is_mla_backend:
                  self.required_prefill_response_num = (
-@@ -610,8 +627,12 @@ class CommonKVBootstrapServer(BaseKVBootstrapServer):
+@@ -422,6 +443,7 @@ class CommonKVReceiver(BaseKVReceiver):
+                             f"Could not fetch bootstrap info for engine rank: {self.kv_mgr.kv_args.engine_rank} and target_dp_group: {self.target_dp_group} and target_pp_rank {target_pp_rank}",
+                         )
+                         self.kv_mgr.update_status(self.bootstrap_room, KVPoll.Failed)
++                        self.bootstrap_infos = None
+                         return
+ 
+             self.bootstrap_infos = bootstrap_infos
+@@ -610,8 +632,12 @@ class CommonKVBootstrapServer(BaseKVBootstrapServer):
              and int(target_dp_group) == -1
              and int(target_pp_rank) == -1
          ):
@@ -219,7 +238,7 @@ index 1d8baf002..1672de78d 100644
  
          if not hasattr(self, "polling_count"):
 diff --git a/python/sglang/srt/disaggregation/mooncake/conn.py b/python/sglang/srt/disaggregation/mooncake/conn.py
-index d0d4efd95..e5e5f1b5f 100644
+index d0d4efd95..fc4eef7b9 100644
 --- a/python/sglang/srt/disaggregation/mooncake/conn.py
 +++ b/python/sglang/srt/disaggregation/mooncake/conn.py
 @@ -260,6 +260,19 @@ class MooncakeKVManager(CommonKVManager):
@@ -357,6 +376,18 @@ index d0d4efd95..e5e5f1b5f 100644
                  elif status == KVPoll.Failed:
                      self.record_failure(
                          bootstrap_room,
+@@ -1266,7 +1329,10 @@ class MooncakeKVReceiver(CommonKVReceiver):
+         super().__init__(mgr, bootstrap_addr, bootstrap_room, prefill_dp_rank)
+ 
+         self.kv_mgr.addr_to_rooms_tracker[self.bootstrap_addr].add(self.bootstrap_room)
+-        self.kv_mgr.update_status(self.bootstrap_room, KVPoll.WaitingForInput)
++        # Only transition to WaitingForInput if bootstrap succeeded;
++        # if super().__init__() set status to Failed, do not override it.
++        if self.bootstrap_infos is not None:
++            self.kv_mgr.update_status(self.bootstrap_room, KVPoll.WaitingForInput)
+ 
+     def _register_kv_args(self):
+         for bootstrap_info in self.bootstrap_infos:
 diff --git a/python/sglang/srt/disaggregation/prefill.py b/python/sglang/srt/disaggregation/prefill.py
 index fbc801635..21fc1ce0d 100644
 --- a/python/sglang/srt/disaggregation/prefill.py
@@ -688,7 +719,7 @@ index ca54a931b..6c102a251 100644
              if enable_dual_stream:
                  current_stream = torch.cuda.current_stream()
 diff --git a/python/sglang/srt/layers/attention/nsa/utils.py b/python/sglang/srt/layers/attention/nsa/utils.py
-index 00ef96f9b..9885fcd0d 100644
+index 00ef96f9b..5adaec804 100644
 --- a/python/sglang/srt/layers/attention/nsa/utils.py
 +++ b/python/sglang/srt/layers/attention/nsa/utils.py
 @@ -54,7 +54,12 @@ def can_nsa_prefill_cp_round_robin_split(forward_batch: "ForwardBatch"):
@@ -744,20 +775,32 @@ index 00ef96f9b..9885fcd0d 100644
      if can_nsa_prefill_cp_round_robin_split(forward_batch):
          tokens = ceil_div(tokens, attn_cp_size)
      return tokens
-@@ -152,10 +166,9 @@ class NSAContextParallelMetadata:
+@@ -152,10 +166,20 @@ class NSAContextParallelMetadata:
  
  def can_cp_split(seq_len: int, cp_size: int, use_nsa: bool, forward_batch):
      if is_nsa_prefill_cp_round_robin_split():
-+        if seq_len < cp_size or seq_len % cp_size != 0:
-+            return False
-         cur_cp_seq_len = seq_len // cp_size
+-        cur_cp_seq_len = seq_len // cp_size
 -        assert (
 -            seq_len % cp_size == 0
 -        ), f"seq_len {seq_len} is not divisible by cp_size {cp_size} when nsa_prefill_cp_mode is round-robin-split"
++        # Use actual extend sequence length instead of (possibly padded) input_ids
++        # length to stay consistent with can_nsa_prefill_cp_round_robin_split(),
++        # which also checks sum(extend_seq_lens_cpu).  When prepare_mlp_sync_batch
++        # pads input_ids to ceil_align(n, attn_cp_size), len(input_ids) can become
++        # divisible by cp_size even though the real extend length is not, causing
++        # hidden_states to be CP-split while the attention metadata is not.
++        actual_seq_len = (
++            sum(forward_batch.extend_seq_lens_cpu)
++            if forward_batch.extend_seq_lens_cpu is not None
++            else seq_len
++        )
++        if actual_seq_len < cp_size or actual_seq_len % cp_size != 0:
++            return False
++        cur_cp_seq_len = actual_seq_len // cp_size
      else:
          # TODO current just support prefill batch=1 and len(input_ids) > self.cp_size * 2
          # Note: (self.cp_size * 2) To achieve load balancing for seq computation,
-@@ -175,10 +188,6 @@ def can_cp_split(seq_len: int, cp_size: int, use_nsa: bool, forward_batch):
+@@ -175,10 +199,6 @@ def can_cp_split(seq_len: int, cp_size: int, use_nsa: bool, forward_batch):
  
  def cp_split_and_rebuild_data(forward_batch, input_: torch.Tensor):
      if is_nsa_prefill_cp_round_robin_split():
@@ -768,7 +811,7 @@ index 00ef96f9b..9885fcd0d 100644
          return nsa_cp_round_robin_split_data(input_)
  
      input_list = list(
-@@ -192,11 +201,6 @@ def cp_split_and_rebuild_data(forward_batch, input_: torch.Tensor):
+@@ -192,11 +212,6 @@ def cp_split_and_rebuild_data(forward_batch, input_: torch.Tensor):
  
  def cp_split_and_rebuild_position(forward_batch, positions: torch.Tensor):
      if is_nsa_prefill_cp_round_robin_split():
@@ -2082,7 +2125,7 @@ index fa08bb66a..fa539315c 100644
                  prefix_lens,
                  seq_lens,
 diff --git a/python/sglang/srt/mem_cache/hiradix_cache.py b/python/sglang/srt/mem_cache/hiradix_cache.py
-index d7cd472a9..1207ab199 100644
+index d7cd472a9..81fae740f 100644
 --- a/python/sglang/srt/mem_cache/hiradix_cache.py
 +++ b/python/sglang/srt/mem_cache/hiradix_cache.py
 @@ -76,6 +76,7 @@ class HiRadixCache(RadixCache):
@@ -2114,6 +2157,30 @@ index d7cd472a9..1207ab199 100644
              node = node.parent
          return delta
  
+@@ -827,6 +827,7 @@ class HiRadixCache(RadixCache):
+         self._update_host_leaf_status(node)
+         # update leaf status for the parent because the node is evicted
+         self._update_leaf_status(node.parent)
++        self._update_host_leaf_status(node.parent)
+         return num_evicted
+ 
+     def _evict_regular(self, node: TreeNode):
+@@ -1330,6 +1331,7 @@ class HiRadixCache(RadixCache):
+                     self._update_host_leaf_status(node)
+                     # update parent status as a new leaf is added into device
+                     self._update_leaf_status(node.parent)
++                    self._update_host_leaf_status(node.parent)
+                 else:
+                     self._inc_hit_count(node, chunked)
+                     total_prefix_length += prefix_len
+@@ -1345,6 +1347,7 @@ class HiRadixCache(RadixCache):
+                     self._update_host_leaf_status(new_node)
+                     # update parent status as a new leaf is added into device
+                     self._update_leaf_status(new_node.parent)
++                    self._update_host_leaf_status(new_node.parent)
+                 else:
+                     self._inc_hit_count(new_node, chunked)
+                     total_prefix_length += prefix_len
 diff --git a/python/sglang/srt/mem_cache/memory_pool.py b/python/sglang/srt/mem_cache/memory_pool.py
 index 1d917137c..669e5c518 100644
 --- a/python/sglang/srt/mem_cache/memory_pool.py
@@ -2347,6 +2414,122 @@ index cc673a9ca..06c430d2c 100644
      if hasattr(backend, "use_mha") and backend.use_mha:
          return AttnForwardMethod.MHA_ONE_SHOT
      return AttnForwardMethod.MLA
+diff --git a/python/sglang/srt/models/deepseek_nextn.py b/python/sglang/srt/models/deepseek_nextn.py
+index cb13a7c67..d62111471 100644
+--- a/python/sglang/srt/models/deepseek_nextn.py
++++ b/python/sglang/srt/models/deepseek_nextn.py
+@@ -29,6 +29,7 @@ from sglang.srt.layers.attention.nsa.utils import (
+     can_cp_split,
+     cp_all_gather_rerange_output,
+     cp_split_and_rebuild_data,
++    cp_split_and_rebuild_position,
+     is_nsa_enable_prefill_cp,
+     nsa_use_prefill_cp,
+     prepare_input_dp_with_cp_dsa,
+@@ -160,6 +161,7 @@ class DeepseekModelNextN(nn.Module):
+ 
+         if nsa_use_prefill_cp(forward_batch, self.nsa_enable_prefill_cp):
+             hidden_states = cp_split_and_rebuild_data(forward_batch, hidden_states)
++            positions = cp_split_and_rebuild_position(forward_batch, positions)
+         residual = None
+         with get_global_expert_distribution_recorder().disable_this_region():
+             hidden_states, residual = self.decoder(
+diff --git a/python/sglang/srt/models/glm4v_moe.py b/python/sglang/srt/models/glm4v_moe.py
+index 324de18b4..c99723f49 100644
+--- a/python/sglang/srt/models/glm4v_moe.py
++++ b/python/sglang/srt/models/glm4v_moe.py
+@@ -52,11 +52,31 @@ class Glm4vMoeForConditionalGeneration(Glm4vForConditionalGeneration):
+         self.num_fused_shared_experts = 0
+         self.determine_num_fused_shared_experts()
+ 
+-        self.model = Glm4MoeModel(
+-            config,
+-            quant_config,
+-            prefix=add_prefix("language_model", prefix),
+-        )
++        if not self.config.encoder_only:
++            self.model = Glm4MoeModel(
++                config,
++                quant_config,
++                prefix=add_prefix("language_model", prefix),
++            )
++
++            if self.pp_group.is_last_rank:
++                if self.pp_group.world_size == 1 and self.config.tie_word_embeddings:
++                    self.lm_head = self.model.embed_tokens
++                else:
++                    self.lm_head = ParallelLMHead(
++                        config.vocab_size,
++                        config.hidden_size,
++                        quant_config=quant_config,
++                        prefix=add_prefix("lm_head", prefix),
++                        use_attn_tp_group=get_global_server_args().enable_dp_lm_head,
++                    )
++            else:
++                # ranks other than the last rank will have a placeholder layer
++                self.lm_head = PPMissingLayer()
++        else:
++            # encoder_only mode: no language model, so no lm_head needed
++            self.lm_head = None
++
+         self.visual = Glm4vVisionModel(
+             config.vision_config,
+             quant_config=quant_config,
+@@ -64,21 +84,6 @@ class Glm4vMoeForConditionalGeneration(Glm4vForConditionalGeneration):
+             use_data_parallel=self.use_data_parallel,
+         )
+ 
+-        if self.pp_group.is_last_rank:
+-            if self.pp_group.world_size == 1 and self.config.tie_word_embeddings:
+-                self.lm_head = self.model.embed_tokens
+-            else:
+-                self.lm_head = ParallelLMHead(
+-                    config.vocab_size,
+-                    config.hidden_size,
+-                    quant_config=quant_config,
+-                    prefix=add_prefix("lm_head", prefix),
+-                    use_attn_tp_group=get_global_server_args().enable_dp_lm_head,
+-                )
+-        else:
+-            # ranks other than the last rank will have a placeholder layer
+-            self.lm_head = PPMissingLayer()
+-
+         self.logits_processor = LogitsProcessor(config)
+         self.pooler = Pooler(pooling_type=PoolingType.LAST, normalize=True)
+         self.is_mrope_enabled = "mrope_section" in self.config.rope_scaling
+@@ -219,6 +224,11 @@ class Glm4vMoeForConditionalGeneration(Glm4vForConditionalGeneration):
+                 # Skip loading extra bias for GPTQ models.
+                 if name.endswith(".bias") and name not in params_dict:
+                     continue
++                # Skip loading visual/language model weights
++                if (
++                    self.config.encoder_only or self.config.language_only
++                ) and name not in params_dict:
++                    continue
+                 if name not in params_dict:
+                     continue
+ 
+@@ -234,6 +244,8 @@ class Glm4vMoeForConditionalGeneration(Glm4vForConditionalGeneration):
+                     param_name, weight_name, expert_id, shard_id = mapping
+                     if weight_name not in name:
+                         continue
++                    if "visual" in name or self.config.encoder_only:
++                        continue
+ 
+                     # Mark as expert weight regardless of whether we can process it
+                     is_expert_weight = True
+@@ -265,6 +277,11 @@ class Glm4vMoeForConditionalGeneration(Glm4vForConditionalGeneration):
+                     # Skip loading extra bias for GPTQ models.
+                     if name.endswith(".bias") and name not in params_dict:
+                         continue
++                    # Skip loading mm/language parameters
++                    if (
++                        self.config.encoder_only or self.config.language_only
++                    ) and name not in params_dict:
++                        continue
+                     if name not in params_dict:
+                         continue
+ 
 diff --git a/python/sglang/srt/models/gpt_oss.py b/python/sglang/srt/models/gpt_oss.py
 index 2cf813bce..1250c49e4 100644
 --- a/python/sglang/srt/models/gpt_oss.py
@@ -2461,6 +2644,82 @@ index 2cf813bce..1250c49e4 100644
  def _canonicalize_weights(config, weights_in: Iterable[Tuple[str, torch.Tensor]]):
      weights_out_dict = dict(weights_in)
  
+diff --git a/python/sglang/srt/models/qwen3_5.py b/python/sglang/srt/models/qwen3_5.py
+index f01225487..1dad8bb8e 100644
+--- a/python/sglang/srt/models/qwen3_5.py
++++ b/python/sglang/srt/models/qwen3_5.py
+@@ -372,6 +372,7 @@ class Qwen3_5LinearDecoderLayer(nn.Module):
+             input_layernorm=self.input_layernorm,
+             post_attention_layernorm=self.post_attention_layernorm,
+             allow_reduce_scatter=True,
++            is_last_layer=(layer_id == config.num_hidden_layers - 1),
+         )
+ 
+     def forward(
+@@ -400,11 +401,24 @@ class Qwen3_5LinearDecoderLayer(nn.Module):
+         use_reduce_scatter = self.layer_communicator.should_use_reduce_scatter(
+             forward_batch
+         )
+-        hidden_states = self.mlp(hidden_states, forward_batch, use_reduce_scatter)
+ 
+-        hidden_states, residual = self.layer_communicator.postprocess_layer(
+-            hidden_states, residual, forward_batch
++        should_allreduce_fusion = (
++            self.layer_communicator.should_fuse_mlp_allreduce_with_next_layer(
++                forward_batch
++            )
+         )
++        if isinstance(self.mlp, Qwen2MoeSparseMoeBlock):
++            hidden_states = self.mlp(hidden_states, forward_batch, use_reduce_scatter)
++        else:
++            hidden_states = self.mlp(
++                hidden_states, should_allreduce_fusion, use_reduce_scatter
++            )
++        if should_allreduce_fusion:
++            hidden_states._sglang_needs_allreduce_fusion = True
++        else:
++            hidden_states, residual = self.layer_communicator.postprocess_layer(
++                hidden_states, residual, forward_batch
++            )
+ 
+         return hidden_states, residual
+ 
+@@ -549,6 +563,7 @@ class Qwen3_5AttentionDecoderLayer(nn.Module):
+             input_layernorm=self.input_layernorm,
+             post_attention_layernorm=self.post_attention_layernorm,
+             allow_reduce_scatter=True,
++            is_last_layer=(layer_id == config.num_hidden_layers - 1),
+         )
+ 
+         self.alt_stream = alt_stream
+@@ -633,11 +648,24 @@ class Qwen3_5AttentionDecoderLayer(nn.Module):
+         use_reduce_scatter = self.layer_communicator.should_use_reduce_scatter(
+             forward_batch
+         )
+-        hidden_states = self.mlp(hidden_states, forward_batch, use_reduce_scatter)
+ 
+-        hidden_states, residual = self.layer_communicator.postprocess_layer(
+-            hidden_states, residual, forward_batch
++        should_allreduce_fusion = (
++            self.layer_communicator.should_fuse_mlp_allreduce_with_next_layer(
++                forward_batch
++            )
+         )
++        if isinstance(self.mlp, Qwen2MoeSparseMoeBlock):
++            hidden_states = self.mlp(hidden_states, forward_batch, use_reduce_scatter)
++        else:
++            hidden_states = self.mlp(
++                hidden_states, should_allreduce_fusion, use_reduce_scatter
++            )
++        if should_allreduce_fusion:
++            hidden_states._sglang_needs_allreduce_fusion = True
++        else:
++            hidden_states, residual = self.layer_communicator.postprocess_layer(
++                hidden_states, residual, forward_batch
++            )
+ 
+         return hidden_states, residual
+ 
 diff --git a/python/sglang/srt/models/qwen3_vl.py b/python/sglang/srt/models/qwen3_vl.py
 index d641826e3..3abc39ef3 100644
 --- a/python/sglang/srt/models/qwen3_vl.py
@@ -2489,6 +2748,79 @@ index d641826e3..3abc39ef3 100644
              hidden_states, residual = layer(
                  positions,
                  hidden_states,
+diff --git a/python/sglang/srt/multimodal/processors/glm4v.py b/python/sglang/srt/multimodal/processors/glm4v.py
+index 33cce6fe2..0970c4550 100644
+--- a/python/sglang/srt/multimodal/processors/glm4v.py
++++ b/python/sglang/srt/multimodal/processors/glm4v.py
+@@ -1,6 +1,9 @@
+ from typing import List, Union
+ 
++import torch
++
+ from sglang.srt.layers.rotary_embedding import MRotaryEmbedding
++from sglang.srt.managers.schedule_batch import Modality, MultimodalDataItem
+ from sglang.srt.models.glm4v import Glm4vForConditionalGeneration
+ from sglang.srt.models.glm4v_moe import Glm4vMoeForConditionalGeneration
+ from sglang.srt.multimodal.processors.base_processor import (
+@@ -45,6 +48,8 @@ class Glm4vImageProcessor(SGLangBaseProcessor):
+         self.IMAGE_END_TOKEN_ID = hf_config.image_end_token_id
+         self.VIDEO_START_TOKEN_ID = hf_config.video_start_token_id
+         self.VIDEO_END_TOKEN_ID = hf_config.video_end_token_id
++        self.IM_START_TOKEN_ID = self.IMAGE_START_TOKEN_ID
++        self.IM_END_TOKEN_ID = self.IMAGE_END_TOKEN_ID
+ 
+         # Vision config
+         self.IMAGE_FACTOR = 28
+@@ -59,6 +64,36 @@ class Glm4vImageProcessor(SGLangBaseProcessor):
+             video_token_id=self.IM_TOKEN_ID,
+         ).build(_processor)
+ 
++    def get_mm_data(self, prompt, embeddings, img_grid_thw):
++        input_ids, offsets = self.build_input_ids(prompt, img_grid_thw)
++        mm_items = [
++            MultimodalDataItem(
++                modality=Modality.IMAGE,
++                offsets=offsets,
++                precomputed_embeddings=embeddings,
++            )
++        ]
++
++        input_ids_tensor = torch.tensor(input_ids)
++        mrope_positions, mrope_position_delta = MRotaryEmbedding.get_rope_index_glm4v(
++            input_ids=input_ids_tensor.unsqueeze(0),
++            hf_config=self.hf_config,
++            image_grid_thw=img_grid_thw,
++            video_grid_thw=None,
++            attention_mask=None,
++        )
++        mrope_positions = mrope_positions.squeeze(1)
++
++        return {
++            "input_ids": input_ids,
++            "mm_items": mm_items,
++            "im_start_id": self.IM_START_TOKEN_ID,
++            "im_end_id": self.IM_END_TOKEN_ID,
++            "im_token_id": self.IM_TOKEN_ID,
++            "mrope_positions": mrope_positions,
++            "mrope_position_delta": mrope_position_delta,
++        }
++
+     async def process_mm_data_async(
+         self,
+         image_data: List[Union[str, bytes]],
+diff --git a/python/sglang/srt/multimodal/processors/qwen_vl.py b/python/sglang/srt/multimodal/processors/qwen_vl.py
+index 4395654e4..f9b5ea4ab 100644
+--- a/python/sglang/srt/multimodal/processors/qwen_vl.py
++++ b/python/sglang/srt/multimodal/processors/qwen_vl.py
+@@ -317,7 +317,7 @@ class QwenVLImageProcessor(SGLangBaseProcessor):
+         **kwargs,
+     ):
+         entry_time = time.perf_counter()
+-        base_output = self.load_mm_data(
++        base_output = self.legacy_load_mm_data(
+             prompt=input_text,
+             image_data=image_data,
+             video_data=request_obj.video_data,
 diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
 index b080aeb16..957a613fa 100644
 --- a/python/sglang/srt/server_args.py

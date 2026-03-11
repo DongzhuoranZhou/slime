@@ -118,12 +118,6 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="The qkv layout for Megatron backend.",
             )
             parser.add_argument(
-                "--true-on-policy-mode",
-                action="store_true",
-                default=False,
-                help="Whether to enable true-on-policy mode.",
-            )
-            parser.add_argument(
                 "--train-env-vars",
                 type=json.loads,
                 default="{}",
@@ -1427,7 +1421,7 @@ def _pre_parse_mode():
     the final ``args`` after Phase 2 parsing.
     """
     temp_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    temp_parser.add_argument("--train-backend", type=str, choices=["megatron", "fsdp"], default="megatron")
+    temp_parser.add_argument("--train-backend", type=str, choices=["megatron"], default="megatron")
     temp_parser.add_argument("--debug-rollout-only", action="store_true", default=False)
     temp_parser.add_argument("--debug-train-only", action="store_true", default=False)
     temp_parser.add_argument("--load-debug-rollout-data", type=str, default=None)
@@ -1450,25 +1444,16 @@ def parse_args(add_custom_arguments=None):
     if not skip_sglang:
         sglang_ns = sglang_parse_args()
 
-    # Phase 2: Parse megatron/fsdp + slime args.
+    # Phase 2: Parse megatron + slime args.
     # Uses ignore_unknown_args=True so that --sglang-* and pre-parsed CLI flags
-    # are silently ignored by the megatron/fsdp parser.
-    if pre.train_backend == "megatron":
-        from slime.backends.megatron_utils.arguments import megatron_parse_args
-        from slime.backends.megatron_utils.arguments import validate_args as megatron_validate_args
+    # are silently ignored by the megatron parser.
+    from slime.backends.megatron_utils.arguments import megatron_parse_args
+    from slime.backends.megatron_utils.arguments import validate_args as megatron_validate_args
 
-        args = megatron_parse_args(
-            extra_args_provider=add_slime_arguments,
-            skip_hf_validate=pre.debug_rollout_only,
-        )
-    else:
-        logger.warning(
-            "🚧 🚧 🚧 FSDP backend is being rewritten, please use Megatron backend for better stability. 🚧 🚧 🚧"
-        )
-
-        from slime.backends.fsdp_utils.arguments import fsdp_parse_args
-
-        args = fsdp_parse_args(extra_args_provider=add_slime_arguments, ignore_unknown_args=True)
+    args = megatron_parse_args(
+        extra_args_provider=add_slime_arguments,
+        skip_hf_validate=pre.debug_rollout_only,
+    )
 
     # Merge pre-parsed args into the main namespace
     for key, value in vars(pre).items():
@@ -1655,6 +1640,14 @@ def slime_validate_args(args):
         args.debug_train_only = True
 
     args.use_critic = args.advantage_estimator == "ppo"
+    if args.critic_train_only:
+        if not args.use_critic:
+            raise ValueError("--critic-train-only requires --use-critic (or --advantage-estimator ppo).")
+        if args.actor_num_nodes != 0 or args.actor_num_gpus_per_node != 0:
+            raise ValueError(
+                "--critic-train-only requires --actor-num-nodes 0 --actor-num-gpus-per-node 0, "
+                f"but got actor_num_nodes={args.actor_num_nodes}, actor_num_gpus_per_node={args.actor_num_gpus_per_node}."
+            )
     if args.critic_num_gpus_per_node is None:
         args.critic_num_gpus_per_node = args.actor_num_gpus_per_node
     if args.critic_num_nodes is None:
