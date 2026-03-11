@@ -12,20 +12,18 @@ pkill -9 python
 
 set -ex
 
-<<<<<<< HEAD:scripts/run-glm4-9B.sh
-=======
 export TMPDIR="/workspace/tmp"
 export HF_HOME="/workspace/.cache/huggingface"
 export XDG_CACHE_HOME="/workspace/.cache"
 export XDG_DATA_HOME="/workspace/.local/share"
 export XDG_STATE_HOME="/workspace/.local/state"
 
-export http_proxy="http://httpproxy.glm.ai:3128"
-export https_proxy="http://httpproxy.glm.ai:3128"
+# export http_proxy="http://httpproxy.glm.ai:8888"
+# export https_proxy="http://httpproxy.glm.ai:8888"
 
->>>>>>> f0c5df38 (add wandb test shell file and wandb test python file):scripts/run-glm4-9B_original_with_wandb_w_CIDR.sh
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
+export WANDB_KEY="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"
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
 if [ "$NVLINK_COUNT" -gt 0 ]; then
@@ -39,15 +37,16 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/models/glm4-9B.sh"
 
 CKPT_ARGS=(
-   --hf-checkpoint /root/GLM-Z1-9B-0414/
-   --ref-load /root/GLM-Z1-9B-0414_torch_dist
-   --load /root/GLM-Z1-9B-0414_slime/
-   --save /root/GLM-Z1-9B-0414_slime/
-   --save-interval 20
+   --hf-checkpoint /workspace/.cache/huggingface/hub/GLM-Z1-9B-0414
+   --ref-load /workspace/.cache/huggingface/hub/GLM-Z1-9B-0414_torch_dist
+   # If empty or doesn't contain a valid checkpoint, loads from --ref-load instead, so please comment --load
+   # --load /workspace/.cache/huggingface/hub/GLM-Z1-9B-0414_slime/ # 
+   --save /lc3T/GLM-Z1-9B-0414_slime_original/
+   --save-interval 3
 )
 
 ROLLOUT_ARGS=(
-   --prompt-data /root/dapo-math-17k/dapo-math-17k.jsonl
+   --prompt-data /workspace/.cache/huggingface/datasets/dapo-math-17k/dapo-math-17k.jsonl
    --input-key prompt
    --label-key label
    --apply-chat-template
@@ -55,20 +54,20 @@ ROLLOUT_ARGS=(
 
    --rm-type deepscaler
 
-   --num-rollout 3000
-   --rollout-batch-size 32
-   --n-samples-per-prompt 8
+   --num-rollout 5
+   --rollout-batch-size 8
+   --n-samples-per-prompt 2
    --rollout-max-response-len 8192
    --rollout-temperature 1
 
-   --global-batch-size 256
+   --global-batch-size 16
    --balance-data
 )
 
 EVAL_ARGS=(
-   --eval-interval 20
-   --eval-prompt-data aime /root/aime-2024/aime-2024.jsonl
-   --n-samples-per-eval-prompt 16
+   --eval-interval 3
+   --eval-prompt-data aime /workspace/.cache/huggingface/datasets/aime-2024/aime-2024.jsonl
+   --n-samples-per-eval-prompt 2
    --eval-max-response-len 16384
    --eval-top-p 1
 )
@@ -110,10 +109,11 @@ OPTIMIZER_ARGS=(
 )
 
 WANDB_ARGS=(
-   #--use-wandb
-   # --wandb-project slime-dev
-   # --wandb-group qwen3-4B-test
-   # --wandb-key ${WANDB_KEY}
+   --use-wandb
+   --wandb-project slime-zhipu-wandb-debug
+   --wandb-group qwen3-9B-test
+   --wandb-key ${WANDB_KEY}
+   --wandb-host https://wandb.glm.ai
 )
 
 SGLANG_ARGS=(
@@ -133,21 +133,20 @@ MISC_ARGS=(
 
 # launch the master node of ray in container
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-<<<<<<< HEAD:scripts/run-glm4-9B.sh
-=======
 
-export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},platform.glm.ai,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,10.101.6.123"
+# export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 # export NO_PROXY="${no_proxy}"
 
 # export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.,172.16.,172.17.,172.18.,172.19.,172.2,192.168."
+export no_proxy="localhost, 127.0.0.1,${LOCAL_IP},${MASTER_ADDR},platform.glm.ai,10.*,192.168.*,172.16.*,172.17.*,172.18.*,172.19.*,172.20.*,172.21.*,172.22.*"
+
 export NO_PROXY="${no_proxy}"
->>>>>>> f0c5df38 (add wandb test shell file and wandb test python file):scripts/run-glm4-9B_original_with_wandb_w_CIDR.sh
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
 # Build the runtime environment JSON with proper variable substitution
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
-    \"PYTHONPATH\": \"/root/Megatron-LM/\",
+    \"PYTHONPATH\": \"/workspace/Megatron-LM/\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
     \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\"
   }
