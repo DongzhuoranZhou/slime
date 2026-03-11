@@ -137,7 +137,8 @@ export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 # export NO_PROXY="${no_proxy}"
 
 # export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.,172.16.,172.17.,172.18.,172.19.,172.2,192.168."
-export no_proxy="localhost, 127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.*,192.168.*,172.16.*,172.17.*,172.18.*,172.19.*,172.20.*,172.21.*,172.22.*"
+export no_proxy="localhost, 127.0.0.1,${LOCAL_IP},${MASTER_ADDR},platform.glm.ai,10.*,192.168.*,172.16.*,172.17.*,172.18.*,172.19.*,172.20.*,172.21.*,172.22.*"
+
 export NO_PROXY="${no_proxy}"
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 

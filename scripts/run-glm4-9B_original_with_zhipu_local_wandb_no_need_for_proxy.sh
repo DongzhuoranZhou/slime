@@ -18,8 +18,8 @@ export XDG_CACHE_HOME="/workspace/.cache"
 export XDG_DATA_HOME="/workspace/.local/share"
 export XDG_STATE_HOME="/workspace/.local/state"
 
-export http_proxy="http://httpproxy.glm.ai:3128"
-export https_proxy="http://httpproxy.glm.ai:3128"
+# export http_proxy="http://httpproxy.glm.ai:8888"
+# export https_proxy="http://httpproxy.glm.ai:8888"
 
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
@@ -110,9 +110,10 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project slime-dev
+   --wandb-project slime-zhipu-wandb-debug
    --wandb-group qwen3-9B-test
    --wandb-key ${WANDB_KEY}
+   --wandb-host https://wandb.glm.ai
 )
 
 SGLANG_ARGS=(
@@ -133,10 +134,12 @@ MISC_ARGS=(
 # launch the master node of ray in container
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 
-export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},platform.glm.ai,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,10.101.6.123"
+# export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 # export NO_PROXY="${no_proxy}"
 
 # export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.,172.16.,172.17.,172.18.,172.19.,172.2,192.168."
+export no_proxy="localhost, 127.0.0.1,${LOCAL_IP},${MASTER_ADDR},platform.glm.ai,10.*,192.168.*,172.16.*,172.17.*,172.18.*,172.19.*,172.20.*,172.21.*,172.22.*"
+
 export NO_PROXY="${no_proxy}"
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
