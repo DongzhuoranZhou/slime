@@ -55,12 +55,12 @@ ROLLOUT_ARGS=(
    --rm-type deepscaler
 
    --num-rollout 5
-   --rollout-batch-size 8
+   --rollout-batch-size 2
    --n-samples-per-prompt 2
    --rollout-max-response-len 8192
    --rollout-temperature 1
 
-   --global-batch-size 16
+   --global-batch-size 4
    --balance-data
 )
 
@@ -152,10 +152,12 @@ RUNTIME_ENV_JSON="{
     \"https_proxy\": \"${https_proxy}\",
     \"no_proxy\": \"${no_proxy}\",
     \"NO_PROXY\": \"${NO_PROXY}\",
-    \"WANDB_SERVICE_WAIT\": \"300\",
-    \"WANDB_SILENT\": \"true\"
+    \"WANDB_START_METHOD\": \"thread\"
   }
 }"
+#     \"WANDB_DISABLE_SERVICE\": \"true\"
+   #  \"WANDB_SERVICE_WAIT\": \"300\",
+   #  \"WANDB_SILENT\": \"true\",
 
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
