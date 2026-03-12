@@ -155,9 +155,6 @@ RUNTIME_ENV_JSON="{
     \"WANDB_START_METHOD\": \"thread\"
   }
 }"
-#     \"WANDB_DISABLE_SERVICE\": \"true\"
-   #  \"WANDB_SERVICE_WAIT\": \"300\",
-   #  \"WANDB_SILENT\": \"true\",
 
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
