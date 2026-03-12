@@ -137,17 +137,23 @@ export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 # export NO_PROXY="${no_proxy}"
 
 # export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.,172.16.,172.17.,172.18.,172.19.,172.2,192.168."
-export no_proxy="localhost, 127.0.0.1,${LOCAL_IP},${MASTER_ADDR},platform.glm.ai,10.*,192.168.*,172.16.*,172.17.*,172.18.*,172.19.*,172.20.*,172.21.*,172.22.*"
-
+export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},platform.glm.ai,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 export NO_PROXY="${no_proxy}"
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
 # Build the runtime environment JSON with proper variable substitution
+# Proxy vars must be explicitly forwarded — Ray workers do not inherit the parent shell environment.
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
     \"PYTHONPATH\": \"/workspace/Megatron-LM/\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
-    \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\"
+    \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\",
+    \"http_proxy\": \"${http_proxy}\",
+    \"https_proxy\": \"${https_proxy}\",
+    \"no_proxy\": \"${no_proxy}\",
+    \"NO_PROXY\": \"${NO_PROXY}\",
+    \"WANDB_SERVICE_WAIT\": \"300\",
+    \"WANDB_SILENT\": \"true\"
   }
 }"
 
