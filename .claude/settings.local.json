@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo $PATH)",
+      "Read(//root/**)",
+      "Bash(python -c \"import httpx; print\\(httpx.__version__\\); help\\(httpx.AsyncClient.__init__\\)\" 2>&1 | head -60)",
+      "Skill(commit-commands:commit-push-pr)",
+      "Bash(git stash:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(which gh:*)",
+      "Bash(git checkout:*)",
+      "Bash(git remote:*)",
+      "Bash(git branch:*)",
+      "Bash(git ls-remote:*)",
+      "Bash(GIT_SSH_COMMAND=\"ssh -o ConnectTimeout=10\" git push origin fix/httpx-trust-env-internal-sglang 2>&1; echo \"EXIT: $?\")",
+      "Bash(gh auth:*)"
+    ]
+  }
+}
