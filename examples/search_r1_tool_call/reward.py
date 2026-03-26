@@ -1,44 +1,44 @@
 """
 Reward function for search_r1_tool_call.
 
-Scoring logic:
-- Full score (reward_score)                : EM match + tool was used
-- Slightly reduced (reward_score - format) : EM match but no tool call made
-- Partial (reward_tool_use_score)          : tool used but no EM match / no answer
-- Zero                                     : no answer + no tool
+Exact reproduction of the search-r1 reward (examples/search-r1/qa_em_format.py:compute_score_em)
+adapted for the native tool-call format.
 
-The model is instructed to wrap its final answer in <answer>...</answer> tags
-(same as the original search-r1 convention), which keeps answer extraction simple
-and avoids re-parsing Qwen's role tokens.
+Original reward is purely sparse 0/1:
+- 1.0  : EM match on the final answer
+- 0.0  : everything else (no answer, wrong answer, no tool call)
 
-normalize_answer and em_check are inlined from examples/search-r1/qa_em_format.py
-(Apache-2.0, adapted from Bytedance / Search-R1).
+Note: compute_score_em in qa_em_format.py accepts a `format_score` kwarg but never uses it
+in the function body — all partial-credit parameters default to 0.  The original
+generate_with_search.py therefore produces strictly sparse 0/1 rewards, and this
+function reproduces that behaviour exactly.
+
+The only difference from the original is the answer extraction: instead of
+    <answer>...</answer>
+we parse the native Qwen tool-call format:
+    <tool_call>{"name": "answer", "arguments": {"response": "..."}}</tool_call>
 """
 
 from __future__ import annotations
 
-import random
+import json
 import re
 import string
 from typing import Any
 
 from slime.utils.types import Sample
 
-# Matches the model's standard tool-call output
-TOOL_CALL_RE = re.compile(r"<tool_call>\s*\{.*?\}\s*</tool_call>", re.DOTALL)
-
-# Strips injected tool observation turns (Qwen role tokens added by apply_chat_template)
-# e.g. <|im_start|>tool\nDoc 1 ...<|im_end|>
+# Strips injected tool observation turns so retrieved documents containing
+# answer-like JSON don't produce false positives.
 _TOOL_TURN_RE = re.compile(r"<\|im_start\|>tool\n.*?<\|im_end\|>", re.DOTALL)
 
-# Extracts the final answer the model placed between <answer> tags
-_ANSWER_RE = re.compile(r"<answer>(.*?)</answer>", re.DOTALL)
+# Extracts the answer tool call JSON payload.
+_ANSWER_TOOL_RE = re.compile(r'<tool_call>\s*(\{.*?"name":\s*"answer".*?\})\s*</tool_call>', re.DOTALL)
 
 
-# ── EM helpers (inlined from examples/search-r1/qa_em_format.py) ─────────────
+# ── EM helpers (identical to qa_em_format.py) ────────────────────────────────
 
 def _normalize_answer(s: str) -> str:
-    """Lower, strip punctuation and articles, collapse whitespace."""
     s = s.lower()
     s = "".join(ch for ch in s if ch not in set(string.punctuation))
     s = re.sub(r"\b(a|an|the)\b", " ", s)
@@ -55,29 +55,29 @@ def _em_check(prediction: str, golden_answers: list[str] | str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _extract_final_answer(response: str) -> str | None:
-    """
-    Extract the last <answer>...</answer> from the model's response, ignoring
-    content inside injected tool observation turns.
-
-    The full response (sample.response) contains both model-generated tokens
-    and injected observation tokens. Tool turns look like:
-        <|im_start|>tool\n...search results...<|im_end|>
-    We strip those before looking for <answer> so web content can't accidentally
-    match the answer pattern.
-    """
+    """Extract the answer string from the last answer tool call in the response."""
     cleaned = _TOOL_TURN_RE.sub("", response)
-    matches = list(_ANSWER_RE.finditer(cleaned))
+    matches = list(_ANSWER_TOOL_RE.finditer(cleaned))
     if not matches:
         return None
-    return matches[-1].group(1).strip()
+    raw = matches[-1].group(1).strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    arguments = payload.get("arguments") or {}
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            return None
+    return (arguments.get("response") or "").strip() or None
 
 
 def _get_golden_answers(label: Any) -> list[str] | None:
-    """Resolve ground-truth answers from the sample label."""
     if label is None:
         return None
     if isinstance(label, dict):
-        # Search-R1 format: {"ground_truth": {"target": [...]}}
         gt = label.get("ground_truth", label)
         if isinstance(gt, dict):
             return gt.get("target") or gt.get("answers")
@@ -91,39 +91,17 @@ def _get_golden_answers(label: Any) -> list[str] | None:
 
 async def reward_func(args: Any, sample: Sample, **kwargs) -> float:
     """
-    Reward function for standard tool-calling search training.
-
-    Args:
-        args: training args (includes reward_score, reward_format_score,
-              reward_tool_use_score set from config.yaml)
-        sample: completed rollout sample
+    Sparse 0/1 reward — exact reproduction of the original search-r1 reward.
 
     Returns:
-        float reward in [0, reward_score]
+        1.0  if the extracted answer is an EM match against the ground truth
+        0.0  otherwise (no answer tool call, wrong answer, missing ground truth)
     """
-    reward_score = getattr(args, "reward_score", 1.0)
-    reward_format_score = getattr(args, "reward_format_score", 0.1)
-    reward_tool_use_score = getattr(args, "reward_tool_use_score", 0.05)
-
     response = sample.response or ""
-    tool_used = bool(TOOL_CALL_RE.search(response))
     answer = _extract_final_answer(response)
     golden = _get_golden_answers(sample.label)
 
-    do_print = random.randint(1, 64) == 1
-    if do_print:
-        print("─" * 40)
-        print(f"[reward] golden: {golden}")
-        print(f"[reward] extracted answer: {answer!r}")
-        print(f"[reward] tool_used: {tool_used}")
-
-    if answer is None:
-        return reward_tool_use_score if tool_used else 0.0
-
-    if golden is None:
+    if answer is None or golden is None:
         return 0.0
 
-    if _em_check(answer, golden):
-        return reward_score if tool_used else reward_score - reward_format_score
-
-    return reward_tool_use_score if tool_used else 0.0
+    return 1.0 if _em_check(answer, golden) else 0.0

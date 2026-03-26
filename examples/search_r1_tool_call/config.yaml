@@ -19,7 +19,6 @@ google_api_key: "your_api_key_here"
 google_snippet_only: true
 google_proxy: null
 
-# ── Reward weights ───────────────────────────────────────────────────────────
-reward_score: 1.0         # full score for EM match
-reward_format_score: 0.1  # deducted when answer found but no tool call made
-reward_tool_use_score: 0.05  # partial credit for using the tool without EM match
+# ── Reward ───────────────────────────────────────────────────────────────────
+# Sparse 0/1 reward: 1.0 for EM match, 0.0 otherwise.
+# Reproduces the original search-r1 reward exactly (see qa_em_format.py).

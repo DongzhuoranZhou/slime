@@ -17,7 +17,7 @@ from slime.ray.train_actor import TrainRayActor
 from slime.utils import train_dump_utils
 from slime.utils.data import process_rollout_data
 from slime.utils.distributed_utils import get_gloo_group, init_process_group
-from slime.utils.logging_utils import init_tracking
+from slime.utils.logging_utils import finish_tracking, init_tracking
 from slime.utils.memory_utils import clear_memory, print_memory
 from slime.utils.misc import Box
 from slime.utils.reloadable_process_group import destroy_process_groups, monkey_patch_torch_dist, reload_process_groups
@@ -159,6 +159,9 @@ class MegatronTrainRayActor(TrainRayActor):
         self.prof.on_init_end()
 
         return start_rollout_id
+
+    def dispose(self):
+        finish_tracking(self.args)
 
     @timer
     def sleep(self) -> None:

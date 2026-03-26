@@ -1,11 +1,14 @@
 """
-SearchEnv: standard tool-calling environment for web search RL training.
+SearchEnv: standard tool-calling environment for retrieval-augmented RL training.
 
-The model is expected to emit:
-    <tool_call>{"name": "web_search", "arguments": {"query": "..."}}</tool_call>
+The model uses two native Qwen tool calls:
+    <tool_call>{"name": "search", "arguments": {"query": "..."}}</tool_call>
+    <tool_call>{"name": "answer", "arguments": {"response": "..."}}</tool_call>
 
-Search results are returned as a tool observation turn, injected via
-apply_chat_template by the geo3k_vlm_multi_turn rollout infrastructure.
+The search tool is backend-agnostic: config.yaml selects "local" (dense retrieval via
+local_search_server.py) or "google" (Google Search API via google_search_server.py).
+Search results are returned as a tool observation turn via apply_chat_template.
+The answer tool ends the episode immediately with no observation.
 
 Reuses local_search_server.py and google_search_server.py from examples/search-r1/
 (exposed via PYTHONPATH in the launch script).
@@ -22,7 +25,6 @@ from typing import Any
 
 from examples.geo3k_vlm_multi_turn.base_env import BaseInteractionEnv
 
-from slime.utils.async_utils import run
 from slime.utils.types import Sample
 
 logger = logging.getLogger(__name__)
@@ -30,14 +32,14 @@ logger = logging.getLogger(__name__)
 # Matches <tool_call>{...}</tool_call> — same pattern as env_geo3k.py
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
 
-# OpenAI-compatible tool schema for the web search tool.
-# Passed to tokenizer.apply_chat_template(tools=[WEB_SEARCH_TOOL]) so Qwen
-# embeds the function definition in the system prompt automatically.
-WEB_SEARCH_TOOL = {
+# OpenAI-compatible tool schemas.
+# Passed to tokenizer.apply_chat_template(tools=TOOLS) so Qwen embeds both
+# function definitions in the system prompt automatically.
+SEARCH_TOOL = {
     "type": "function",
     "function": {
-        "name": "web_search",
-        "description": "Search the web for information relevant to the question.",
+        "name": "search",
+        "description": "Search for information relevant to the question.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -50,6 +52,26 @@ WEB_SEARCH_TOOL = {
         },
     },
 }
+
+ANSWER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "answer",
+        "description": "Submit your final answer to the question.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "response": {
+                    "type": "string",
+                    "description": "Your final answer.",
+                }
+            },
+            "required": ["response"],
+        },
+    },
+}
+
+TOOLS = [SEARCH_TOOL, ANSWER_TOOL]
 
 # Module-level semaphore — created lazily on the background async loop (L2)
 # so it belongs to the same event loop that runs all search coroutines.
@@ -106,11 +128,10 @@ class SearchEnv(BaseInteractionEnv):
     """
     Interaction environment for multi-turn web-search RL.
 
-    On each turn the rollout calls step(response_text). If the model emitted a
-    <tool_call> for web_search, we execute the search synchronously (bridging
-    to the async search function via slime.utils.async_utils.run) and return
-    the results as the next observation. If no tool call is found we treat the
-    response as the model's final answer and set done=True.
+    On each turn the rollout calls step(response_text). The model uses two tools:
+    - search: execute a search, return results as the next observation.
+    - answer: submit final answer, end the episode immediately (done=True, empty obs).
+    If no tool call is found the episode also ends (model gave free-form response).
     """
 
     def __init__(self, *, ground_truth: Any = None, max_turns: int, config: dict):
@@ -138,7 +159,10 @@ class SearchEnv(BaseInteractionEnv):
             logger.warning("Failed to parse tool call JSON: %s", exc)
             return None
 
-        # Support both {"name":..., "arguments":...} and {"function":{"name":...}}
+        # Qwen native format:    {"name": "search", "arguments": {"query": "..."}}
+        # OpenAI/fallback format: {"function": {"name": "search", "arguments": {...}}}
+        # Qwen's apply_chat_template produces the first format; the second is kept
+        # as a defensive fallback in case an OpenAI-style wrapper wraps the payload.
         name = payload.get("name") or payload.get("function", {}).get("name")
         arguments = payload.get("arguments") or payload.get("function", {}).get("arguments") or {}
         if isinstance(arguments, str):
@@ -151,7 +175,7 @@ class SearchEnv(BaseInteractionEnv):
             return None
         return {"name": name, "arguments": arguments}
 
-    def step(self, response_text: str):
+    async def step(self, response_text: str):
         """
         Process one model response turn.
 
@@ -170,18 +194,29 @@ class SearchEnv(BaseInteractionEnv):
         info["tool_call"] = deepcopy(tool_call)
 
         if tool_call is None:
-            # No tool call → model has given its final answer (or errored).
+            # No tool call → model gave free-form response without using tools.
             info["tool_executed"] = False
             obs = {"obs_str": "", "role": "tool"}
             return obs, True, info
 
         name = (tool_call.get("name") or "").strip()
-        if name != "web_search":
+
+        if name == "answer":
+            # Model submitted its final answer — end episode immediately.
+            response = (tool_call["arguments"].get("response") or "").strip()
+            info["tool_executed"] = True
+            info["final_answer"] = response
+            obs = {"obs_str": "", "role": "tool"}
+            return obs, True, info
+
+        if name != "search":
             info["tool_executed"] = False
             obs = {
                 "obs_str": (
                     f"Tool `{name}` is not supported. "
-                    'Use <tool_call>{"name": "web_search", "arguments": {"query": "your query"}}</tool_call>'
+                    'Use <tool_call>{"name": "search", "arguments": {"query": "your query"}}</tool_call> '
+                    'to search, or <tool_call>{"name": "answer", "arguments": {"response": "your answer"}}</tool_call> '
+                    "to submit your final answer."
                 ),
                 "role": "tool",
             }
@@ -193,17 +228,13 @@ class SearchEnv(BaseInteractionEnv):
             obs = {
                 "obs_str": (
                     "No query provided. "
-                    'Use <tool_call>{"name": "web_search", "arguments": {"query": "your query"}}</tool_call>'
+                    'Use <tool_call>{"name": "search", "arguments": {"query": "your query"}}</tool_call>'
                 ),
                 "role": "tool",
             }
             return obs, is_final, info
 
-        # Execute search synchronously by submitting to the background async loop (L2).
-        # slime.utils.async_utils.run() uses run_coroutine_threadsafe + .result(),
-        # which blocks only this thread — not the main asyncio event loop running
-        # the outer rollout.py generate() coroutine.
-        result_str = run(_dispatch_search(query, self._config))
+        result_str = await _dispatch_search(query, self._config)
         info["tool_executed"] = True
         info["query"] = query
 
@@ -246,8 +277,8 @@ def build_env(sample: Sample | None = None, args: Any | None = None, **_: Any) -
     """
     Factory function called by geo3k_vlm_multi_turn/rollout.py.
 
-    Also injects the WEB_SEARCH_TOOL schema into sample.metadata["tools"] so
-    that _encode_observation_for_generation() uses the correct tools parameter
+    Injects both tool schemas (web_search + answer) into sample.metadata["tools"]
+    so that _encode_observation_for_generation() uses the correct tools parameter
     when calling apply_chat_template for subsequent observation turns.
     """
     if args is None or args.max_turns is None:
@@ -255,7 +286,7 @@ def build_env(sample: Sample | None = None, args: Any | None = None, **_: Any) -
 
     if sample is not None:
         sample.metadata = sample.metadata or {}
-        sample.metadata["tools"] = [WEB_SEARCH_TOOL]
+        sample.metadata["tools"] = TOOLS
 
     ground_truth = _extract_ground_truth(sample)
     if ground_truth is None:

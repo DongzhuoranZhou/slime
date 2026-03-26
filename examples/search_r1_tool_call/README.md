@@ -18,13 +18,15 @@ Standard tool-calling version of [Search-R1](https://github.com/PeterGriffinJin/
 
 ```
 examples/search_r1_tool_call/
-├── config.yaml        — max_turns, search backend, reward weights
-├── env_search.py      — SearchEnv environment + build_env() factory
-├── reward.py          — reward_func: EM scoring, answer extracted from answer tool call
-└── run_qwen3.sh       — launch script (adapt run_qwen2.5_3B.sh for Qwen3)
+├── config.yaml          — max_turns, search backend, reward weights
+├── env_search.py        — SearchEnv environment + build_env() factory
+├── reward.py            — reward_func: EM scoring, answer extracted from answer tool call
+├── run_qwen3_4B.sh      — launch script for Qwen3-4B (enable_thinking=true)
+└── run_qwen2.5_3B.sh    — launch script for Qwen2.5-3B
 
 Search-R1/scripts/data_process/
-└── qa_search_train_merge_standard.py  — generates fresh parquet with two-tool format
+├── qa_search_train_merge_standard.py  — generates train parquet with two-tool format
+└── qa_search_test_merge_standard.py   — generates test parquet (test/dev split)
 ```
 
 Reused without modification:
@@ -38,14 +40,25 @@ Follow [examples/search-r1/README.md](../search-r1/README.md) for environment se
 
 ### 1. Generate the dataset
 
+**Train data (nq + hotpotqa):**
 ```bash
-python Search-R1/scripts/data_process/qa_search_train_merge_standard.py \
-    --local_dir /root/Search-R1/data/nq_hotpotqa_train_standard \
+python /workspace/src/clean_code_for_rl/Search-R1/scripts/data_process/qa_search_train_merge_standard.py \
+    --local_dir /workspace/src/clean_code_for_rl/Search-R1/data/nq_hotpotqa_train_standard \
     --data_sources nq,hotpotqa \
     --model_family qwen3
 ```
+Output: `nq_hotpotqa_train_standard/train_standard.parquet`
 
-This generates `train_standard.parquet` with:
+**Test data (nq only — hotpotqa has no test split in FlashRAG):**
+```bash
+python /workspace/src/clean_code_for_rl/Search-R1/scripts/data_process/qa_search_test_merge_standard.py \
+    --local_dir /workspace/src/clean_code_for_rl/Search-R1/data/nq_hotpotqa_train_standard \
+    --data_sources nq \
+    --model_family qwen3
+```
+Output: `nq_hotpotqa_train_standard/test_standard.parquet`
+
+Each parquet has:
 - User message: just the question (`"Question: {question}"`)
 - `tools` column with both `search` and `answer` schemas
 
@@ -53,34 +66,62 @@ Qwen3's built-in thinking and tool-call pre-training handle the search/answer or
 
 > **Using Qwen2.5?** Pass `--model_family qwen2.5` to add explicit ReAct routing and `<think>` instructions to the user message.
 
-### 2. (Optional) Start local retrieval server
+### 2. Convert checkpoint to Megatron format
+
+```bash
+
+# hf checkpoint
+hf download Qwen/Qwen3-4B --local-dir /root/Qwen3-4B
+
+cd /root/slime
+source scripts/models/qwen3-4B.sh
+PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
+    ${MODEL_ARGS[@]} \
+    --hf-checkpoint /root/Qwen3-4B \
+    --save /root/Qwen3-4B_torch_dist
+```
+
+Update `--hf-checkpoint` and `--save` to match your paths. The output directory is what `--ref-load` points to in the run script.
+
+Specifically
+
+```bash
+# hf checkpoint
+hf download Qwen/Qwen3-4B --local-dir /workspace/.cache/huggingface/hub/Qwen3-4B
+
+cd /workspace/src/clean_code_for_rl/slime_0224_2026/slime
+source scripts/models/qwen3-4B.sh
+PYTHONPATH=/workspace/Megatron-LM python tools/convert_hf_to_torch_dist.py \
+    ${MODEL_ARGS[@]} \
+    --hf-checkpoint /workspace/.cache/huggingface/hub/Qwen3-4B \
+    --save /workspace/.cache/huggingface/hub/Qwen3-4B_torch_dist
+```
+
+### 3. (Optional) Start local retrieval server
 
 See [search-r1/README.md Appendix](../search-r1/README.md#appendix-setting-up-local-retriever).
 
-### 3. Run training
+### 4. Run training
 
 ```bash
 cd /root/slime
-bash examples/search_r1_tool_call/run_qwen3.sh
+bash examples/search_r1_tool_call/run_qwen3_4B.sh
 ```
 
-For Qwen3, add `--apply-chat-template-kwargs '{"enable_thinking": true}'` to `ROLLOUT_ARGS` in the launch script to activate built-in thinking mode.
+`run_qwen3_4B.sh` already includes `--apply-chat-template-kwargs '{"enable_thinking": true}'` to activate Qwen3's built-in thinking mode. For other Qwen3 sizes, copy the script and update the model script source and checkpoint paths accordingly.
 
 ## Configuration
 
-Edit `config.yaml` to change search backend, concurrency, or reward weights:
+Edit `config.yaml` to change search backend or concurrency:
 
 ```yaml
 max_turns: 2              # search turns per episode
 search_backend: local     # "local" or "google"
 search_concurrency: 256   # max concurrent search requests
 topk: 3                   # number of retrieved documents
-
-# Reward
-reward_score: 1.0         # EM match + search used
-reward_format_score: 0.1  # deducted when EM match but no search tool used
-reward_tool_use_score: 0.05  # partial credit for using search without EM match
 ```
+
+The reward is sparse 0/1 (exact match only — no partial credit). This exactly reproduces the original search-r1 reward definition.
 
 ## How it works
 
@@ -117,10 +158,8 @@ The `search` tool is backend-agnostic. `config.yaml` selects:
 
 The model always calls `search` — it never knows or needs to know which backend runs.
 
-### Async/sync bridge
+### Async bridge
 
-The rollout loop (`geo3k_vlm_multi_turn/rollout.py`) calls `env.step()` synchronously.
-The search backends are async. `env_search.py` bridges this with
-`slime.utils.async_utils.run(coro)` which submits the coroutine to a persistent
-background event loop thread (L2), blocking only the calling thread — not the
-main asyncio event loop running the rollout.
+`env_search.py`'s `step()` is `async def` — it `await`s the search coroutine directly.
+`geo3k_vlm_multi_turn/rollout.py` detects this with `asyncio.iscoroutine()` and `await`s it,
+so all concurrent rollout generate() coroutines make progress without blocking each other.
