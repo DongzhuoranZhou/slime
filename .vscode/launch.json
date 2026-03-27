@@ -1,0 +1,49 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug: generate() — dev node (172.20.112.104)",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "/usr/bin/python",
+            "program": "${workspaceFolder}/examples/search_r1_tool_call/debug_generate.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "TARGET": "dev",
+                "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/examples/search-r1",
+                "PYTHONUNBUFFERED": "1"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Debug: generate() — training node (172.20.110.172)",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "/usr/bin/python",
+            "program": "${workspaceFolder}/examples/search_r1_tool_call/debug_generate.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "TARGET": "training",
+                "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/examples/search-r1",
+                "PYTHONUNBUFFERED": "1"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Debug: SearchEnv step-through",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "/usr/bin/python",
+            "program": "${workspaceFolder}/examples/search_r1_tool_call/debug_env.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "PYTHONUNBUFFERED": "1"
+            },
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

@@ -69,7 +69,6 @@ SLIME_SCRIPT_MODEL_NAME=Qwen3-VL-4B-Instruct ./examples/geo3k_vlm/run_geo3k_vlm.
 # SFT
 ./examples/geo_3k_vlm/run_geo3k_vlm_sft.sh
 ```
-
 ### Configuration
 
 | Environment Variable | Default | Description |

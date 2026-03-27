@@ -26,10 +26,7 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://172.20.110.172:8000/retrieve)",
       "Bash(python3 -c \"from transformers import AutoConfig; c = AutoConfig.from_pretrained\\(''/workspace/.cache/huggingface/hub/Qwen3-4B'', trust_remote_code=True\\); print\\(c.model_type\\)\")",
       "Bash(python3 -c \"import transformers; print\\(transformers.__version__\\)\")",
-      "Bash(nvidia-smi --query-gpu=index,name,memory.free --format=csv,noheader)",
-      "Skill(commit-commands:commit)",
-      "Skill(commit-commands:commit:*)",
-      "Bash(python3 -c \"import slime; print\\(slime.__file__\\)\")"
+      "Bash(nvidia-smi --query-gpu=index,name,memory.free --format=csv,noheader)"
     ]
   }
 }

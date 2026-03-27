@@ -28,8 +28,7 @@
       "Bash(python3 -c \"import transformers; print\\(transformers.__version__\\)\")",
       "Bash(nvidia-smi --query-gpu=index,name,memory.free --format=csv,noheader)",
       "Skill(commit-commands:commit)",
-      "Skill(commit-commands:commit:*)",
-      "Bash(python3 -c \"import slime; print\\(slime.__file__\\)\")"
+      "Skill(commit-commands:commit:*)"
     ]
   }
 }
