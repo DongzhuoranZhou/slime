@@ -189,6 +189,9 @@ The local retriever requires a separate conda environment to avoid conflicts wit
 If you don't have conda installed, run the following commands:
 
 ```bash
+export http_proxy="http://httpproxy.glm.ai:8888"
+export https_proxy="http://httpproxy.glm.ai:8888"
+
 # Download and install conda
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh
 bash ~/miniconda.sh -b -p $HOME/miniconda3
@@ -236,6 +239,11 @@ cat $save_path/part_* > $save_path/e5_Flat.index
 # Decompress the corpus
 gzip -d $save_path/wiki-18.jsonl.gz
 ```
+Specifically, I save the dataset in /lc3T
+
+```
+/lc3T/Index
+```
 
 ### Step 4: Start Local Retrieval Server
 
@@ -257,6 +265,34 @@ retriever_path=intfloat/e5-base-v2
 
 # Start the retrieval server
 python /root/slime/examples/search-r1/local_dense_retriever/retrieval_server.py \
+    --index_path $index_file \
+    --corpus_path $corpus_file \
+    --topk 3 \
+    --retriever_name $retriever_name \
+    --retriever_model $retriever_path \
+    --faiss_gpu
+```
+
+Specifically,
+
+```bash
+# If you encounter "conda not found" error, run:
+# source ~/miniconda3/etc/profile.d/conda.sh
+# conda init
+# source ~/.bashrc
+
+# Activate retriever environment
+conda activate retriever
+
+# Set paths
+save_path=/lc3T/Index
+index_file=$save_path/e5_Flat.index
+corpus_file=$save_path/wiki-18.jsonl
+retriever_name=e5
+retriever_path=intfloat/e5-base-v2
+
+# Start the retrieval server
+python /workspace/src/clean_code_for_rl/slime_0224_2026/slime/examples/search-r1/local_dense_retriever/retrieval_server.py \
     --index_path $index_file \
     --corpus_path $corpus_file \
     --topk 3 \

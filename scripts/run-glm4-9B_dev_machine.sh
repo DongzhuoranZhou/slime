@@ -1,4 +1,22 @@
-#!/bin/bash
+   #!/bin/bash
+
+# -------------------------
+# Workspace Environment
+# -------------------------
+# export http_proxy="http://httpproxy.glm.ai:8888"
+# export https_proxy="http://httpproxy.glm.ai:8888"
+
+export TMPDIR="/workspace/tmp"
+export HF_HOME="/workspace/.cache/huggingface"
+export XDG_CACHE_HOME="/workspace/.cache"
+export XDG_DATA_HOME="/workspace/.local/share"
+export XDG_STATE_HOME="/workspace/.local/state"
+
+# Set CUDA_VISIBLE_DEVICES to use only 4 GPUs for development machine
+export CUDA_VISIBLE_DEVICES="0,1,2,3"
+
+# Keep local bin; do NOT prepend conda here.
+export PATH="/workspace/.local/bin:$PATH"
 
 # for rerun the task
 pkill -9 sglang
@@ -12,17 +30,9 @@ pkill -9 python
 
 set -ex
 
-export TMPDIR="/workspace/tmp"
-export HF_HOME="/workspace/.cache/huggingface"
-export XDG_CACHE_HOME="/workspace/.cache"
-export XDG_DATA_HOME="/workspace/.local/share"
-export XDG_STATE_HOME="/workspace/.local/state"
-
-export http_proxy="http://httpproxy.glm.ai:8888"
-export https_proxy="http://httpproxy.glm.ai:8888"
-
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
+# Set your wandb key (optional)
 export WANDB_KEY="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"
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
@@ -41,7 +51,7 @@ CKPT_ARGS=(
    --ref-load /workspace/.cache/huggingface/hub/GLM-Z1-9B-0414_torch_dist
    # If empty or doesn't contain a valid checkpoint, loads from --ref-load instead, so please comment --load
    # --load /workspace/.cache/huggingface/hub/GLM-Z1-9B-0414_slime/ # 
-   --save /lc3T/GLM-Z1-9B-0414_slime_original/
+   --save /lc3T/GLM-Z1-9B-0414_slime_dev_machine/
    --save-interval 3
 )
 
@@ -54,7 +64,7 @@ ROLLOUT_ARGS=(
 
    --rm-type deepscaler
 
-   --num-rollout 5
+   --num-rollout 5 # 3000
    --rollout-batch-size 2
    --n-samples-per-prompt 2
    --rollout-max-response-len 8192
@@ -67,7 +77,7 @@ ROLLOUT_ARGS=(
 EVAL_ARGS=(
    --eval-interval 3
    --eval-prompt-data aime /workspace/.cache/huggingface/datasets/aime-2024/aime-2024.jsonl
-   --n-samples-per-eval-prompt 2
+   --n-samples-per-eval-prompt 1
    --eval-max-response-len 16384
    --eval-top-p 1
 )
@@ -76,7 +86,7 @@ PERF_ARGS=(
    --tensor-model-parallel-size 2
    --sequence-parallel
    --pipeline-model-parallel-size 1
-   --context-parallel-size 2
+   --context-parallel-size 1 # 2 
    --expert-model-parallel-size 1
    --expert-tensor-parallel-size 1
 
@@ -110,8 +120,8 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project slime-zhipu-wandb-debug
-   --wandb-group qwen3-9B-test
+   --wandb-project slime-dev
+   --wandb-group glm4-9B-test
    --wandb-key ${WANDB_KEY}
 )
 
@@ -132,36 +142,30 @@ MISC_ARGS=(
 
 # launch the master node of ray in container
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
+# export MASTER_ADDR=$(hostname -I | awk '{print $1}')
+# echo "Detected IP: ${MASTER_ADDR}"
 
-# export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-# export NO_PROXY="${no_proxy}"
-
-# export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.,172.16.,172.17.,172.18.,172.19.,172.2,192.168."
-export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},platform.glm.ai,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+# Bypass proxy for all internal/local addresses
+export no_proxy="localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,${MASTER_ADDR}"
 export NO_PROXY="${no_proxy}"
-ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
+
+ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 4 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
 # Build the runtime environment JSON with proper variable substitution
-# Proxy vars must be explicitly forwarded — Ray workers do not inherit the parent shell environment.
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
     \"PYTHONPATH\": \"/workspace/Megatron-LM/\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
-    \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\",
-    \"http_proxy\": \"${http_proxy}\",
-    \"https_proxy\": \"${https_proxy}\",
-    \"no_proxy\": \"${no_proxy}\",
-    \"NO_PROXY\": \"${NO_PROXY}\",
-    \"WANDB_START_METHOD\": \"thread\"
+    \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\"
   }
 }"
 
-ray job submit --address="http://127.0.0.1:8265" \
+ray job submit --address="http://${MASTER_ADDR}:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train.py \
    --actor-num-nodes 1 \
-   --actor-num-gpus-per-node 4 \
-   --rollout-num-gpus 4 \
+   --actor-num-gpus-per-node 2 \
+   --rollout-num-gpus 2 \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \
    ${ROLLOUT_ARGS[@]} \
