@@ -63,6 +63,8 @@ class Geo3kEnv(BaseInteractionEnv):
         matches = list(TOOL_CALL_RE.finditer(text))
         raw_json = None
         if matches:
+            # Use the last match so that if the model emits multiple tool calls
+            # in one turn (e.g. during chain-of-thought), only the final one is acted upon.
             raw_json = matches[-1].group(1).strip()
 
         if raw_json is None:
@@ -72,9 +74,13 @@ class Geo3kEnv(BaseInteractionEnv):
         if payload is None:
             return None
 
+        # Support two common payload schemas:
+        #   Flat:        {"name": "...", "arguments": {...}}
+        #   OpenAI-style: {"function": {"name": "...", "arguments": {...}}}
         name = payload.get("name") or payload.get("function", {}).get("name")
         arguments = payload.get("arguments") or payload.get("function", {}).get("arguments") or {}
         if isinstance(arguments, str):
+            # Some models serialise arguments as a JSON string rather than an object.
             try:
                 arguments = json.loads(arguments)
             except json.JSONDecodeError:
@@ -94,6 +100,8 @@ class Geo3kEnv(BaseInteractionEnv):
             return 0.0
 
         answer = answer.strip()
+        # Try the raw answer first; if it has no \boxed wrapper, also try wrapping it so that
+        # grade_answer_verl's LaTeX-aware normaliser can match it against the ground truth.
         candidates = [answer]
         if "\\boxed" not in answer:
             candidates.append(f"\\boxed{{{answer}}}")
@@ -126,6 +134,9 @@ class Geo3kEnv(BaseInteractionEnv):
         """
         Best-effort balanced brace extraction starting at `start` (index of an opening '{').
         Keeps string-awareness to avoid terminating inside quoted braces.
+
+        Note: this method is kept as a utility for potential fallback use; the primary
+        extraction path uses the TOOL_CALL_RE regex instead.
         """
         depth = 0
         in_string = False
@@ -133,6 +144,8 @@ class Geo3kEnv(BaseInteractionEnv):
         for idx in range(start, len(text)):
             ch = text[idx]
             if ch == "\\" and not escaped:
+                # Mark that the next character is escaped; `continue` skips the
+                # `escaped = False` reset at the bottom of the loop body.
                 escaped = True
                 continue
             if ch == '"' and not escaped:
@@ -151,8 +164,11 @@ class Geo3kEnv(BaseInteractionEnv):
         """
         Provide concise feedback for the model to continue reasoning.
         """
-        turn_idx = self.turn - 1  # zero-based
-        # Send the final reminder one turn before the true last turn so the model sees it in time.
+        turn_idx = self.turn - 1  # zero-based index of the turn that just completed
+        # We warn the model that it is on its last attempt one turn *before* the true
+        # last turn (i.e. at turn max_turns-2), so that the warning is visible in the
+        # context when the model generates its final response.
+        # Example: max_turns=3 → warn at turn_idx 1 (second turn), final answer on turn 2.
         last_warning_turn = None
         if self.max_turns is not None:
             if self.max_turns >= 2:
@@ -171,21 +187,31 @@ class Geo3kEnv(BaseInteractionEnv):
                 return (
                     f"calc_score result: {score}. Parsed answer '{parsed_answer}' does not match the reference. "
                     "Your answer is wrong. You may need to reason in a different way. Don't repeat your answer unless necessary. "
-                    "Since you only have one chance to answer, don't call tool again. You should provide your final answer in the form below Answer: \\boxed{$Answer} where $Answer is your fiinal answer to this problem."
+                    "Since you only have one chance to answer, don't call tool again. You should provide your final answer in the form below Answer: \\boxed{$Answer} where $Answer is your final answer to this problem."
                 )
             return (
                 f"calc_score result: {score}. Parsed answer '{parsed_answer}' does not match the reference. "
                 "Your answer is wrong. You may need to reason in a different way. Don't repeat your answer unless necessary."
             )
 
-    # Called during rollout after receiving a model response
     def step(self, response_text: str):
+        """
+        Advance the environment by one turn.
+
+        Returns (obs, done, info). `done` signals whether the rollout loop should stop:
+          - True unconditionally when the model emits no tool call (malformed or free-text response).
+          - True when max_turns is reached, regardless of tool outcome.
+          - False otherwise (the model may keep reasoning and call the tool again).
+        """
         self.turn += 1
         is_final_turn = self.max_turns is not None and self.turn >= self.max_turns
         tool_call = self._extract_tool_call(response_text)
         info: dict[str, Any] = {"tool_call": deepcopy(tool_call)}
 
         if not tool_call:
+            # No tool call means the model gave a free-text response or failed to format
+            # its call correctly.  End the episode immediately (done=True) rather than
+            # waiting for max_turns, since there is nothing useful to score.
             info["tool_executed"] = False
             obs = {
                 "obs_str": "No tool call detected; ending the episode.",

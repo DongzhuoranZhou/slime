@@ -98,6 +98,9 @@ def train(args):
             ray.get(rollout_manager.eval.remote(rollout_id))
 
     ray.get(rollout_manager.dispose.remote())
+    actor_model.dispose()
+    if critic_model is not None:
+        critic_model.dispose()
     finish_tracking(args)
 
 

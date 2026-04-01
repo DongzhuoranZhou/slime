@@ -64,28 +64,29 @@ fi
 echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 # Download model and dataset
-mkdir -p /root/models /root/datasets
-if [ ! -d "/root/models/${MODEL_NAME}" ]; then
-   hf download Qwen/${MODEL_NAME} --local-dir /root/models/${MODEL_NAME}
+mkdir -p /workspace/.cache/huggingface/hub /workspace/.cache/huggingface/datasets
+if [ ! -d "/workspace/.cache/huggingface/hub/${MODEL_NAME}" ]; then
+   hf download Qwen/${MODEL_NAME} --local-dir /workspace/.cache/huggingface/hub/${MODEL_NAME}
 fi
-if [ ! -d "/root/datasets/${DATASET_LOCAL_NAME}" ]; then
-   hf download --repo-type dataset ${DATASET_NAME} --local-dir /root/datasets/${DATASET_LOCAL_NAME}
+if [ ! -d "/workspace/.cache/huggingface/datasets/${DATASET_LOCAL_NAME}" ]; then
+   hf download --repo-type dataset ${DATASET_NAME} --local-dir /workspace/.cache/huggingface/datasets/${DATASET_LOCAL_NAME}
 fi
 
 # Common args
 CKPT_ARGS=(
-   --hf-checkpoint /root/models/${MODEL_NAME}
-   --load /root/models/${MODEL_NAME}
+   --hf-checkpoint /workspace/.cache/huggingface/hub/${MODEL_NAME}
+   --load /workspace/.cache/huggingface/hub/${MODEL_NAME}
 )
 
 SFT_ARGS=(
    --rollout-function-path slime.rollout.sft_rollout.generate_rollout
-   --prompt-data /root/datasets/${DATASET_LOCAL_NAME}/train_formatted.parquet
+   --prompt-data /workspace/.cache/huggingface/datasets/${DATASET_LOCAL_NAME}/train_formatted.parquet
    --input-key messages
+   # --apply-chat-template
    --rollout-shuffle
-   --num-epoch 3000
-   --rollout-batch-size 128
-   --global-batch-size 128
+   --num-epoch 2
+   --rollout-batch-size 2
+   --global-batch-size 2
    
    --loss-type sft_loss
    --calculate-per-token-loss
@@ -159,7 +160,7 @@ fi
 # Build runtime env
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
-    \"PYTHONPATH\": \"/root/Megatron-LM/\",
+    \"PYTHONPATH\": \"/workspace/Megatron-LM/\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
     \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\"
   }

@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo $PATH)",
+      "Read(//root/**)",
+      "Bash(python -c \"import httpx; print\\(httpx.__version__\\); help\\(httpx.AsyncClient.__init__\\)\" 2>&1 | head -60)",
+      "Skill(commit-commands:commit-push-pr)",
+      "Bash(git stash:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(which gh:*)",
+      "Bash(git checkout:*)",
+      "Bash(git remote:*)",
+      "Bash(git branch:*)",
+      "Bash(git ls-remote:*)",
+      "Bash(GIT_SSH_COMMAND=\"ssh -o ConnectTimeout=10\" git push origin fix/httpx-trust-env-internal-sglang 2>&1; echo \"EXIT: $?\")",
+      "Bash(gh auth:*)",
+      "Bash(git commit:*)",
+      "Bash(git:*)",
+      "Read(//workspace/.cache/huggingface/hub/models--Qwen--Qwen3-4B/snapshots/**)",
+      "Bash(grep -r convert_hf_to_torch_dist /workspace/src/clean_code_for_rl/slime_0224_2026/slime --include=*.md --include=*.sh -l)",
+      "Bash(grep -r convert_hf_to_torch_dist /workspace/src/clean_code_for_rl/slime_0224_2026/slime --include=*.md -A5)",
+      "Bash(python -c \"import sglang; print\\(sglang.__file__\\)\")",
+      "Bash(pip show:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://172.20.110.172:30000/health)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://172.20.110.172:8000/retrieve)",
+      "Bash(python3 -c \"from transformers import AutoConfig; c = AutoConfig.from_pretrained\\(''/workspace/.cache/huggingface/hub/Qwen3-4B'', trust_remote_code=True\\); print\\(c.model_type\\)\")",
+      "Bash(python3 -c \"import transformers; print\\(transformers.__version__\\)\")",
+      "Bash(nvidia-smi --query-gpu=index,name,memory.free --format=csv,noheader)",
+      "Skill(commit-commands:commit)",
+      "Skill(commit-commands:commit:*)",
+      "Bash(python3 -c \"import slime; print\\(slime.__file__\\)\")"
+    ]
+  }
+}

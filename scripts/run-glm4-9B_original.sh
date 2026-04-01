@@ -12,6 +12,13 @@ pkill -9 python
 
 set -ex
 
+export TMPDIR="/workspace/tmp"
+export HF_HOME="/workspace/.cache/huggingface"
+export XDG_CACHE_HOME="/workspace/.cache"
+export XDG_DATA_HOME="/workspace/.local/share"
+export XDG_STATE_HOME="/workspace/.local/state"
+
+
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
 
@@ -27,15 +34,16 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/models/glm4-9B.sh"
 
 CKPT_ARGS=(
-   --hf-checkpoint /root/GLM-Z1-9B-0414/
-   --ref-load /root/GLM-Z1-9B-0414_torch_dist
-   --load /root/GLM-Z1-9B-0414_slime/
-   --save /root/GLM-Z1-9B-0414_slime/
-   --save-interval 20
+   --hf-checkpoint /workspace/.cache/huggingface/hub/GLM-Z1-9B-0414
+   --ref-load /workspace/.cache/huggingface/hub/GLM-Z1-9B-0414_torch_dist
+   # If empty or doesn't contain a valid checkpoint, loads from --ref-load instead, so please comment --load
+   # --load /workspace/.cache/huggingface/hub/GLM-Z1-9B-0414_slime/ # 
+   --save /lc3T/GLM-Z1-9B-0414_slime_original/
+   --save-interval 3
 )
 
 ROLLOUT_ARGS=(
-   --prompt-data /root/dapo-math-17k/dapo-math-17k.jsonl
+   --prompt-data /workspace/.cache/huggingface/datasets/dapo-math-17k/dapo-math-17k.jsonl
    --input-key prompt
    --label-key label
    --apply-chat-template
@@ -43,20 +51,20 @@ ROLLOUT_ARGS=(
 
    --rm-type deepscaler
 
-   --num-rollout 3000
-   --rollout-batch-size 32
-   --n-samples-per-prompt 8
+   --num-rollout 5
+   --rollout-batch-size 8
+   --n-samples-per-prompt 2
    --rollout-max-response-len 8192
    --rollout-temperature 1
 
-   --global-batch-size 256
+   --global-batch-size 16
    --balance-data
 )
 
 EVAL_ARGS=(
-   --eval-interval 20
-   --eval-prompt-data aime /root/aime-2024/aime-2024.jsonl
-   --n-samples-per-eval-prompt 16
+   --eval-interval 3
+   --eval-prompt-data aime /workspace/.cache/huggingface/datasets/aime-2024/aime-2024.jsonl
+   --n-samples-per-eval-prompt 2
    --eval-max-response-len 16384
    --eval-top-p 1
 )
@@ -121,12 +129,14 @@ MISC_ARGS=(
 
 # launch the master node of ray in container
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
+export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+export NO_PROXY="${no_proxy}"
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
 
 # Build the runtime environment JSON with proper variable substitution
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
-    \"PYTHONPATH\": \"/root/Megatron-LM/\",
+    \"PYTHONPATH\": \"/workspace/Megatron-LM/\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
     \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\"
   }

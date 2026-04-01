@@ -17,7 +17,7 @@ NUM_GPUS = int(os.environ.get("SLIME_SCRIPT_NUM_GPUS", "4"))
 EXTERNAL_RAY = int(os.environ.get("SLIME_SCRIPT_EXTERNAL_RAY", "0"))
 
 DATASET_NAME = "VeraIsHere/geo3k_imgurl_processed"
-DATA_ROOT = "/root/datasets/geo3k_imgurl_processed"
+DATA_ROOT = "/workspace/.cache/huggingface/datasets/datasets/geo3k_imgurl_processed"
 TRAIN_DATA_PATH = os.path.join(DATA_ROOT, "train.parquet")
 
 
@@ -28,23 +28,25 @@ def get_megatron_model_type(model_name: str) -> str:
 
 
 def prepare():
-    U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command(f"hf download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
-    data_missing = not os.path.exists(TRAIN_DATA_PATH)
-    if data_missing:
-        U.exec_command(f"hf download --repo-type dataset {DATASET_NAME} --local-dir {DATA_ROOT}")
+    U.exec_command("mkdir -p /workspace/.cache/huggingface/hub /workspace/.cache/huggingface/datasets")
+    # hf download Qwen/{MODEL_NAME} --local-dir /workspace/.cache/huggingface/hub/{MODEL_NAME}
+    # U.exec_command(f"hf download Qwen/{MODEL_NAME} --local-dir /workspace/.cache/huggingface/hub/{MODEL_NAME}")
+    # data_missing = not os.path.exists(TRAIN_DATA_PATH)
+    # if data_missing:
+    #     hf download --repo-type dataset {DATASET_NAME} --local-dir {DATA_ROOT}
+    #     U.exec_command(f"hf download --repo-type dataset {DATASET_NAME} --local-dir {DATA_ROOT}")
     if not os.path.exists(TRAIN_DATA_PATH):
         raise FileNotFoundError(f"Dataset not found. Expected local dataset at {TRAIN_DATA_PATH}; ")
 
 
 def execute():
-    ckpt_args = f"--hf-checkpoint /root/models/{MODEL_NAME} "
+    ckpt_args = f"--hf-checkpoint /workspace/.cache/huggingface/hub/{MODEL_NAME} "
 
     wandb_args = (
         (
             "--use-wandb "
-            "--wandb-project slime-dev "
-            "--wandb-group geo3k_vlm_multi_turn "
+            "--wandb-project slime-dev-vlm-multi-turn "
+            "--wandb-group geo3k_vlm_multi_turn_200rollout "
             f"--wandb-key '{wandb_api_key}' "
         )
         if (wandb_api_key := os.environ.get("WANDB_API_KEY"))
@@ -61,7 +63,7 @@ def execute():
         "--custom-generate-function-path examples.geo3k_vlm_multi_turn.rollout.generate "
         "--custom-config-path examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_config.yaml "
         "--rollout-shuffle "
-        "--num-rollout 3000 "
+        "--num-rollout 200 "
         "--rollout-batch-size 64 "
         "--n-samples-per-prompt 8 "
         "--rollout-max-response-len 4096 "
@@ -69,13 +71,13 @@ def execute():
         "--global-batch-size 512 "
     )
 
-    # eval_args = (
-    #     "--eval-interval 20 "
-    #     f"--eval-prompt-data geo3k_eval {TRAIN_DATA_PATH}@[0:64] "
-    #     "--n-samples-per-eval-prompt 1 "
-    #     "--eval-max-response-len 4096 "
-    #     "--eval-top-k 1 "
-    # )
+    eval_args = (
+        "--eval-interval 20 "
+        f"--eval-prompt-data geo3k_eval {TRAIN_DATA_PATH}@[0:64] "
+        "--n-samples-per-eval-prompt 1 "
+        "--eval-max-response-len 4096 "
+        "--eval-top-k 1 "
+    )
 
     grpo_args = (
         "--advantage-estimator grpo "
@@ -104,7 +106,7 @@ def execute():
 
     backend_args = (
         "--train-backend megatron "
-        f"--load /root/models/{MODEL_NAME} "
+        f"--load /workspace/.cache/huggingface/hub/{MODEL_NAME} "
         "--tensor-model-parallel-size 4 "
         "--sequence-parallel "
         "--pipeline-model-parallel-size 1 "
@@ -134,6 +136,7 @@ def execute():
     train_args = (
         f"{ckpt_args} "
         f"{rollout_args} "
+        f"{eval_args} "
         f"{optimizer_args} "
         f"{grpo_args} "
         f"{sglang_args} "
