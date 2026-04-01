@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git merge:*)",
+      "Bash(ls scripts/*.sh examples/**/*.sh)"
+    ]
+  }
+}

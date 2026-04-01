@@ -29,13 +29,51 @@ The reward model is the default math RM.
 # 1) Set environment variable
 export WANDB_API_KEY=...
 export SLIME_SCRIPT_MODEL_NAME=Qwen3-VL-2B-Instruct
-export SLIME_SCRIPT_NUM_GPUS=4
+export SLIME_SCRIPT_NUM_GPUS=8
 
 # 2) Download the dataset
 hf download --repo-type dataset VeraIsHere/geo3k_imgurl_processed --local-dir /root/datasets/geo3k_imgurl_processed
 
 # 3) Run the script:
 cd /root/slime
+python examples/geo3k_vlm_multi_turn/run_geo3k_vlm_multi_turn.py
+```
+
+Specifically
+```bash
+# 1) Set environment variable
+export http_proxy="http://httpproxy.glm.ai:8888"
+export https_proxy="http://httpproxy.glm.ai:8888"
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+export no_proxy="localhost,127.0.0.1,${LOCAL_IP},${MASTER_ADDR},10.*,192.168.*,172.16.*,172.17.*,172.18.*,172.19.*,172.20.*,172.21.*,172.22.*"
+export NO_PROXY="${no_proxy}"
+
+export WANDB_API_KEY="local-643dfe5b804d35d8ab5aeba347f30f4ee0c6ca6f"
+export WANDB_BASE_URL=https://wandb.glm.ai
+export SLIME_SCRIPT_MODEL_NAME=Qwen3-VL-2B-Instruct
+export SLIME_SCRIPT_NUM_GPUS=8
+
+# 2) Install slime from workspace.
+# The Docker image has slime pre-installed at /root/slime. Without this step, Python imports
+# command_utils.py from /root/slime, which hardcodes PYTHONPATH=/root/Megatron-LM/ and sources
+# model scripts from /root/slime/scripts/. Running pip install -e . here updates the editable
+# install mapping so Python imports from this workspace instead, picking up the correct paths.
+# --no-deps: skip reinstalling dependencies (already in Docker). --break-system-packages: needed
+# because pip treats this as a system-level change on Debian-managed Python.
+cd /workspace/src/clean_code_for_rl/slime_0224_2026/slime
+pip install -e . --no-deps --break-system-packages
+
+# 3) Download the model
+hf download Qwen/${SLIME_SCRIPT_MODEL_NAME} --local-dir /workspace/.cache/huggingface/hub/${SLIME_SCRIPT_MODEL_NAME}
+
+# 4) Download the dataset
+hf download --repo-type dataset VeraIsHere/geo3k_imgurl_processed --local-dir /workspace/.cache/huggingface/datasets/datasets/geo3k_imgurl_processed
+
+# 5) Unset proxies (required for inter-node communication during training)
+unset http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY
+
+# 6) Run the script:
+cd /workspace/src/clean_code_for_rl/slime_0224_2026/slime
 python examples/geo3k_vlm_multi_turn/run_geo3k_vlm_multi_turn.py
 ```
 

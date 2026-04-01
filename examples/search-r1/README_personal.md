@@ -1,49 +1,5 @@
-## Environment Setup
 
-
-
-Use the `slimerl/slime:latest` image. 
-
-Go to `hub.docker.com`, search `slimerl/slime:latest`, find exact version, e.g., `nightly-dev-20260126a`.
-
-Then create a new dev machine by using the public image, e.g., 
-
-Check the libs installation
-```bash
-pip list | head -30
-pip list | grep -E "torch|cuda|ray|slime|megatron|transformers|datasets|wandb|sglang" | sort
-```
-it should shows
-```bash
-cuda-bindings                      13.1.1
-cuda-pathfinder                    1.3.3
-cuda-python                        13.1.1
-datasets                           4.4.2
-megatron-bridge                    0.3.0rc0
-megatron-core                      0.16.0rc0                     /root/Megatron-LM
-memray                             1.19.1
-nvidia-cuda-cupti-cu12             12.9.79
-nvidia-cuda-nvrtc-cu12             12.9.86
-nvidia-cuda-runtime-cu12           12.9.79
-ray                                2.53.0
-sglang                             0.0.0.dev1+gdce8b0606         /sgl-workspace/sglang/python
-sglang-router                      0.3.0
-slime                              0.2.1                         /root/slime
-torch                              2.9.1+cu129
-torchao                            0.9.0
-torchaudio                         2.9.1+cu129
-torch_c_dlpack_ext                 0.1.5
-torchcodec                         0.8.0
-torch_memory_saver                 0.0.9
-torchprofile                       0.0.4
-torchvision                        0.24.1+cu129
-transformer_engine_torch           2.10.0
-transformers                       4.57.1
-wandb                              0.24.0
-```
-
-
-and initialize the environment required for Search-R1:
+Initialize the environment required for Search-R1:
 
 ```bash
 cd /workspace/src/clean_code_for_rl/slime
@@ -198,8 +154,12 @@ CUSTOM_ARGS=(
 ## Running the Script
 
 ```bash
-cd slime/
+cd /workspace/src/clean_code_for_rl/slime_0224_2026/slime
 bash examples/search-r1/run_qwen2.5_3B.sh
+
+bash examples/search-r1/run_qwen2.5_3B_test_zhipu_wandb.sh
+
+bash examples/search-r1/run_qwen2.5_3B_train_test_zhipu_wandb.sh
 ```
 
 ## Code Structure
@@ -228,6 +188,12 @@ The local retriever requires a separate conda environment to avoid conflicts wit
 If you don't have conda installed, run the following commands:
 
 ```bash
+
+
+export http_proxy="http://httpproxy.glm.ai:8888"                                                
+export https_proxy="http://httpproxy.glm.ai:8888"
+
+
 # Download and install conda
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh
 bash ~/miniconda.sh -b -p $HOME/miniconda3
@@ -298,8 +264,11 @@ retriever_path=intfloat/e5-base-v2
 export HF_DATASETS_CACHE=/lc3T/hf_cache
 export HF_HOME=/lc3T/hf_cache
 
+export http_proxy="http://httpproxy.glm.ai:8888"                                                
+export https_proxy="http://httpproxy.glm.ai:8888"
 # Start the retrieval server
-CUDA_VISIBLE_DEVICES=5 python /root/slime/examples/search-r1/local_dense_retriever/retrieval_server.py \
+
+CUDA_VISIBLE_DEVICES=4,5,6,7 python /workspace/src/clean_code_for_rl/slime/examples/search-r1/local_dense_retriever/retrieval_server.py \
     --index_path $index_file \
     --corpus_path $corpus_file \
     --topk 3 \
@@ -320,17 +289,19 @@ CUDA_VISIBLE_DEVICES=5 python /root/slime/examples/search-r1/local_dense_retriev
 Make sure you're **NOT** in the retriever conda environment. If you are, run `conda deactivate`.
 
 ```bash
-cd /workspace/src/clean_code_for_rl/slime
+cd /workspace/src/clean_code_for_rl/slime_0224_2026/slime/
 
 # Set your wandb key (optional)
-export WANDB_KEY="17278b0722f73fd31b59"
-export CUDA_VISIBLE_DEVICES=1,2,3,4,6,7
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 # If ray process is stuck, try:
 # rm -rf /root/.cache
 # rm -rf /root/.*
 
 # Run the training script
-bash /workspace/src/clean_code_for_rl/slime/examples/search-r1/run_qwen2.5_3B.sh
+
+bash /workspace/src/clean_code_for_rl/slime_0224_2026/slime/examples/search-r1/run_qwen2.5_3B.sh
+
+bash /workspace/src/clean_code_for_rl/slime_0224_2026/slime/examples/search-r1/run_qwen2.5_3B_test_zhipu_wandb.sh
 ```
 
 ### Troubleshooting
