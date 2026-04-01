@@ -69,6 +69,25 @@ SLIME_SCRIPT_MODEL_NAME=Qwen3-VL-4B-Instruct ./examples/geo3k_vlm/run_geo3k_vlm.
 # SFT
 ./examples/geo_3k_vlm/run_geo3k_vlm_sft.sh
 ```
+
+Specifically
+```bash
+export http_proxy="http://httpproxy.glm.ai:8888"
+export https_proxy="http://httpproxy.glm.ai:8888"
+
+export WANDB_API_KEY="local-643dfe5b804d35d8ab5aeba347f30f4ee0c6ca6f"
+export WANDB_BASE_URL=https://wandb.glm.ai
+# Megatron backend (default -> Qwen3-VL-8B-Instruct + Megatron)
+./examples/geo3k_vlm/run_geo3k_vlm.sh
+
+# With different model
+SLIME_SCRIPT_MODEL_NAME=Qwen3-VL-4B-Instruct ./examples/geo3k_vlm/run_geo3k_vlm.sh
+
+# SFT
+./examples/geo_3k_vlm/run_geo3k_vlm_sft.sh
+```
+
+
 ### Configuration
 
 | Environment Variable | Default | Description |
