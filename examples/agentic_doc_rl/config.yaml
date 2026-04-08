@@ -1,0 +1,35 @@
+# examples/agentic_doc_rl/config.yaml
+
+# ── Environment ──────────────────────────────────────────────────────────────
+# Max tool-call turns per episode. Shorter than SFT's 15 to keep RL episodes
+# fast; increase once the model reliably uses tools.
+max_turns: 6
+
+# Qdrant server — must be running before training starts.
+# Start with: ./qdrant  (binary) or docker run -p 6333:6333 qdrant/qdrant
+qdrant_url: "http://localhost:6333"
+
+# Name of the Qdrant collection holding the indexed document pages.
+collection_name: "mmlongdoc"
+
+# Device for the JinaV4 embedding model (used by search_database tool).
+embed_device: "cuda:0"
+
+# Number of pages returned per search_database call.
+topk: 3
+
+# ── Environment module ───────────────────────────────────────────────────────
+# Loaded by geo3k_vlm_multi_turn/rollout.py via --custom-config-path.
+rollout_interaction_env_path: examples.agentic_doc_rl.env_doc_search
+
+# ── Reward ───────────────────────────────────────────────────────────────────
+# Options: rule_based | llm_judge | both
+#   rule_based  — F1 token overlap against ground truth (fast, no extra GPU)
+#   llm_judge   — LLM evaluator via OpenAI-compatible API (slow, higher quality)
+#   both        — rule_based drives training; llm_judge logged to wandb as diagnostic
+reward_type: rule_based
+
+# Judge model settings (only used when reward_type is llm_judge or both).
+judge_url: "http://localhost:30000"
+judge_model: "Qwen3-VL-30B-A3B-Instruct"
+judge_api_key: "EMPTY"
