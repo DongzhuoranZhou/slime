@@ -84,7 +84,7 @@ TOOLS = [SEARCH_DATABASE_TOOL, GET_SPECIFIC_PAGES_TOOL]
 # QdrantClient and JinaV4Model are initialised once per worker process.
 # JinaV4 is ~1.5 GB — reloading it per sample would be prohibitively slow.
 _qdrant_client: QdrantClient | None = None
-_embed_model: JinaV4Model | None = None
+_embed_model: Any | None = None
 
 
 def _get_qdrant_client(qdrant_url: str) -> QdrantClient:
