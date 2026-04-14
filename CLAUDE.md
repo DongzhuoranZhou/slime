@@ -75,6 +75,38 @@ All slime-specific CLI arguments are defined in `slime/utils/arguments.py` (larg
 | `health_monitor.py` | System health and fault detection |
 | `wandb_utils.py` | W&B experiment tracking |
 
+## AgenticMemory (`AgenticMemory/`)
+
+A separate git repo (cloned inside slime) for **agentic trajectory distillation** — collecting multi-step tool-calling trajectories from a teacher VLM and SFT-training a smaller student model on them.
+
+### Stack (different from slime core)
+- **smolagents** — agent loop (`ToolCallingAgent`, `ActionStep`)
+- **Qdrant** — vector DB storing page-level image embeddings of documents; must be running before `collect_trajectories.py`
+- **LiteLLM** — unified API wrapper; supports Qwen via SGLang (`openai/Qwen3-VL-30B-...`) and Gemini (`openai/gemini-2.5-pro`) with the same code, just different `.env`
+- **JinaV4** — multimodal embedding model used for semantic page search
+
+### Pipeline
+```
+Qdrant (doc embeddings) + SGLang (teacher VLM)
+  → collect_trajectories.py   # runs smolagents loop, writes JSONL
+  → format_trajectories.py    # converts to slime-compatible parquet (messages + images + tools)
+  → run_agentic_sft.sh        # slime SFT with --loss-type sft_loss --debug-train-only
+```
+
+### Prerequisites to run `collect_trajectories.py`
+1. Qdrant server running on port 6333 (binary or Docker); set `QDRANT_URL=http://localhost:6333` in `.env`
+2. SGLang server running with the teacher model; set `--sglang-url`
+3. Documents pre-indexed into Qdrant (see `AgenticMemory/scripts/`)
+
+### Key files
+| File | Purpose |
+|------|---------|
+| `collect_trajectories.py` | Runs teacher agent, outputs trajectory JSONL |
+| `format_trajectories.py` | Converts JSONL → parquet for slime SFT |
+| `run_agentic_sft.sh` | Launches slime SFT training on collected trajectories |
+| `tools.py` | `SearchDatabaseTool`, `GetSpecificPagesTool`, `SearchMemoryTool`, `ReflectionTool` |
+| `DISTILLATION.md` | Full setup and run instructions |
+
 ## Key Conventions
 
 - Python 3.10+ required; tested on 3.10, 3.11, 3.12
