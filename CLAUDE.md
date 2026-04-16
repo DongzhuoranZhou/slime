@@ -55,6 +55,10 @@ E2E/CI tests run inside Docker (`slimerl/slime:latest`) on a self-hosted GPU clu
 ### Training Entry Points
 - `train.py` — synchronous: rollout → train → sync weights, repeat
 - `train_async.py` — asynchronous: prefetches next rollout while training current batch
+- `scripts/run-*.sh` — production launch scripts per model (`run-glm4.7-30B-A3B.sh`, `run-glm5-744B-A40B.sh`, `run-kimi-k2-Instruct.sh`, `run-qwen3-235B-A22B-sft.sh`, etc.). Use these as templates rather than invoking `train.py` directly.
+
+### Examples (`examples/`)
+Self-contained end-to-end recipes. Notable: `agentic_doc_rl/` (DocSearchEnv + custom reward for AgenticMemory RL), `fully_async/`, `tau-bench/`, `retool/`, `search-r1/`, `on_policy_distillation/`, `geo3k_vlm*` (VLM RL/SFT), `multi_agent/`. Read these before writing new rollout/reward code — most integration patterns already exist here.
 
 ### Plugin System (`slime_plugins/`)
 - `mbridge/`: model-specific parameter mapping bridges (GLM, Qwen, DeepSeek, Llama)
@@ -77,7 +81,7 @@ All slime-specific CLI arguments are defined in `slime/utils/arguments.py` (larg
 
 ## AgenticMemory (`AgenticMemory/`)
 
-A separate git repo (cloned inside slime) for **agentic trajectory distillation** — collecting multi-step tool-calling trajectories from a teacher VLM and SFT-training a smaller student model on them.
+A **git submodule** (see `.gitmodules`, url: `github.com/ZhuYuqicheng/AgenticMemory.git`) for **agentic trajectory distillation** — collecting multi-step tool-calling trajectories from a teacher VLM and SFT-training a smaller student model on them. After a fresh clone, run `git submodule update --init --recursive` before anything in `AgenticMemory/` will work.
 
 ### Stack (different from slime core)
 - **smolagents** — agent loop (`ToolCallingAgent`, `ActionStep`)
@@ -97,6 +101,9 @@ Qdrant (doc embeddings) + SGLang (teacher VLM)
 1. Qdrant server running on port 6333 (binary or Docker); set `QDRANT_URL=http://localhost:6333` in `.env`
 2. SGLang server running with the teacher model; set `--sglang-url`
 3. Documents pre-indexed into Qdrant (see `AgenticMemory/scripts/`)
+
+### Logs & eval outputs
+Collection + eval scripts write JSONL to `${AGENTIC_MEMORY_LOG_DIR:-/lc3T/AgenticMemory/logs}` (pattern: `${DATASET}_${AGENT_MODEL_NAME#*/}.jsonl`). These logs live **outside the repo** — they are not versioned and are not captured by git worktrees. Set `AGENTIC_MEMORY_LOG_DIR` to redirect.
 
 ### Key files
 | File | Purpose |
