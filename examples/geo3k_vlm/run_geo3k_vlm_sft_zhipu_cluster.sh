@@ -115,6 +115,7 @@ if [ -n "$WANDB_API_KEY" ]; then
         --wandb-project slime-geo3k-vlm-sft
         --wandb-group ${MODEL_NAME_LOWER}-${TRAIN_BACKEND}
         --wandb-key ${WANDB_API_KEY}
+        --wandb-host https://wandb.glm.ai
         --disable-wandb-random-suffix
     )
 else
@@ -162,7 +163,9 @@ RUNTIME_ENV_JSON="{
   \"env_vars\": {
     \"PYTHONPATH\": \"/workspace/Megatron-LM/\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
-    \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\"
+    \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\",
+    \"WANDB_API_KEY\": \"${WANDB_API_KEY}\",
+    \"WANDB_BASE_URL\": \"https://wandb.glm.ai\"
   }
 }"
 

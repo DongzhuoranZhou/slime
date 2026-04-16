@@ -6,6 +6,8 @@
 - Launch script: [`run_geo3k_vlm_sft.sh`](https://github.com/DongzhuoranZhou/slime/blob/dev_main/examples/geo3k_vlm/run_geo3k_vlm_sft.sh)
 - Data prep: [`prepare_sft_data.py`](https://github.com/DongzhuoranZhou/slime/blob/dev_main/examples/geo3k_vlm/prepare_sft_data.py)
 
+**Primary source:** [`docs/en/examples/qwen3-4b-base-openhermes.md`](../en/examples/qwen3-4b-base-openhermes.md) — the official slime SFT example this page is based on. When in doubt about an argument, check there first.
+
 ---
 
 ## Why SFT Before RL

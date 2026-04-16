@@ -80,7 +80,9 @@
       "Bash(.venv/bin/python:*)",
       "Bash(curl -I https://huggingface.co/jinaai/jina-embeddings-v4/resolve/main/config.json)",
       "Bash(curl -v --proxy http://httpproxy.glm.ai:8888 https://huggingface.co/jinaai/jina-embeddings-v4/resolve/main/config.json)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(echo \"directory does not exist\" ls /usr/local/lib/python3.12/dist-packages/__editable__.sglang*)",
+      "Read(//lc/**)"
     ]
   }
 }

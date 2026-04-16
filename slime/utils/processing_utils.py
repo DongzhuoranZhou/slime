@@ -47,6 +47,32 @@ def load_processor(name_or_path: str, **kwargs):
     return proc
 
 
+def _normalize_image_value(value):
+    """Convert raw bytes to a data URI so qwen_vl_utils.fetch_image can handle it.
+
+    slime reads parquet via raw pyarrow (batch.to_pylist()), which returns image
+    columns as Python bytes objects regardless of the HF datasets feature type.
+    qwen_vl_utils.fetch_image expects a str (URL / data URI) or PIL.Image — it
+    calls .startswith("http://") which raises TypeError on bytes.
+    """
+    if isinstance(value, bytes):
+        return "data:image/png;base64," + base64.b64encode(value).decode("utf-8")
+    return value
+
+
+def _normalize_prompt_images(prompt):
+    """Walk message content and convert any bytes image values to data URIs in-place."""
+    if not isinstance(prompt, list):
+        return prompt
+    for message in prompt:
+        content = message.get("content")
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "image":
+                    item["image"] = _normalize_image_value(item["image"])
+    return prompt
+
+
 def process_vision_info(prompt, processor):
     # TODO: temporary solution, will write image utils for slime later
     from qwen_vl_utils import process_vision_info as qwen_process_vision_info
@@ -56,6 +82,7 @@ def process_vision_info(prompt, processor):
     else:
         logger.info(f"Using default patch size: {DEFAULT_PATCH_SIZE}")
         image_patch_size = DEFAULT_PATCH_SIZE
+    prompt = _normalize_prompt_images(prompt)
     images, videos = qwen_process_vision_info(prompt, image_patch_size=image_patch_size)
     multimodal_inputs = {"images": images, "videos": videos}
     return multimodal_inputs
