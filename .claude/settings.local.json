@@ -82,7 +82,17 @@
       "Bash(curl -v --proxy http://httpproxy.glm.ai:8888 https://huggingface.co/jinaai/jina-embeddings-v4/resolve/main/config.json)",
       "Bash(curl:*)",
       "Bash(echo \"directory does not exist\" ls /usr/local/lib/python3.12/dist-packages/__editable__.sglang*)",
-      "Read(//lc/**)"
+      "Read(//lc/**)",
+      "Bash(find / -name \"eval_sft_qwen25_7b_v4_train100.jsonl\")",
+      "Bash(find / -name \"trajectories_overfit100_v4.jsonl\")",
+      "Read(//usr/**)",
+      "Bash(grep -E \"\\\\.md$\")",
+      "Bash(grep -E \"^[ADM]\\\\s+.*\\\\.md$\")",
+      "Bash(grep -v \"^$\")"
+    ],
+    "additionalDirectories": [
+      "/workspace/src/clean_code_for_rl/slime_0224_2026/slime/.git/modules/AgenticMemory",
+      "/workspace/src/clean_code_for_rl/slime_0224_2026/slime"
     ]
   }
 }
